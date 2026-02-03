@@ -1,4 +1,6 @@
 "strict";
+/** @import { Fx,Pair} from "./types" */
+
 /** @type {number} */
 const FPS = 180;
 /** @type {number} */
@@ -11,12 +13,6 @@ const DDT = 1000 / FPS;
 const box =/** @type {HTMLCanvasElement} */ (document.getElementById("box"))
 
 const ctx =/** @type {CanvasRenderingContext2D} */ (box.getContext("2d"))
-
-/**
- * @callback Fx
- * @param {number} x - The x coordinate.
- * @returns {number} The Y coordinate.
- */
 
 /** @type {number} */
 let box_size = 0;
@@ -99,8 +95,8 @@ class Line {
     /** @type {Vec2} */
     end;
     /**
-    * @param {[number,number]} start
-    * @param {[number,number]} end
+    * @param {Pair} start
+    * @param {Pair} end
     */
     constructor(start, end) {
         const [sx, sy] = start;
@@ -138,7 +134,7 @@ class FOfX {
     factor;
     /** @type {number} */
     index;
-    /** @type {[number,number]} */
+    /** @type {Pair} */
     #limits = [-drawer.scale, drawer.scale];
     /**
     * @param {Fx} fun
@@ -302,7 +298,7 @@ class Drawer {
     }
     /**
     * @param {number} radius
-    * @param {[number,number]} center
+    * @param {Pair} center
     */
     circle(radius, center = [0, 0]) {
         const [cx, cy] = center;
