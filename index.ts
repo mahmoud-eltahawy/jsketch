@@ -4,7 +4,6 @@ import { generateRandomRgbColor } from "./utils";
 const FPS = 180
 const TOTAL_FRAMES = 1000
 const DDT = 1000/FPS
-const colors = Array.from({length : 100},() => generateRandomRgbColor());
 
 let scale_x = 10
 let scale_y = 10
@@ -26,7 +25,8 @@ function resize() {
 
 addEventListener("resize",resize)
 
-function normailze({x,y} : Vec2) : Vec2 {
+function normailze(vec2 : Vec2) : Vec2 {
+  const {x,y} = vec2
   const zero = size() / 2
   return {
     x : zero * ( 1 + x/scale_x),
@@ -69,7 +69,7 @@ function draw_gradient() {
   }
 
   if (![1,2,3].includes(draw_gradient_level)) {
-    throw `draw gradient level should be 1 , 2 , 3 or undefined but it = ${draw_gradient_level}`
+    throw `draw gradient level should be 1 , 2 , 3 or null but it = ${draw_gradient_level}`
   }
 
   if (draw_gradient_level >= 1) {
@@ -100,12 +100,12 @@ function draw_gradient() {
 function clear() {
   clear_background()
   draw_gradient()
+  preserve_drawed_shapes()
 }
 
 const shapes : Shape[] = []
 
-//@ts-ignore
-window.F = function (fun : (_: number) => number,miror_x = false,miror_y = false) : number{
+const F = function (fun : (_x: number) => number,miror_x = false,miror_y = false) : number{
   let x = -scale_x
   let vertices : Vec2[]= []
   for (let i = 0; i < TOTAL_FRAMES; i++) {
@@ -127,7 +127,7 @@ window.F = function (fun : (_: number) => number,miror_x = false,miror_y = false
   shapes.push({
     vertices,
     draw_progress : 0,
-    color : colors[index % colors.length],
+    color : generateRandomRgbColor(),
     tf : miror_x && miror_y ? 3 : miror_x || miror_y ? 2 : 1,
     size : 2
   })
@@ -135,17 +135,43 @@ window.F = function (fun : (_: number) => number,miror_x = false,miror_y = false
 }
 
 //@ts-ignore
-window.draw =function (index : number) {
-  const shape = shapes.at(index)
+window.F = F
+
+const Circle = function (radius : number) :number {
+  if (!radius) {
+    throw "radius cannot be null or zero"
+  }
+  return F((x : number) => Math.sqrt(radius**2 - x**2),true)
+}
+
+//@ts-ignore
+window.Circle = Circle
+
+const draw =function (index : number) {
+  const shape = shapes[index]
   if (!shape) {
     throw "shape is not initialzied"
   }
-  for (let i = 0; i < TOTAL_FRAMES; i++) {
+  for (let i = 0; i < shape.vertices.length;i ++) {
     setTimeout(() => {
-      draw_point(shape.vertices[i],shape.size,shape.color)
+      const v = shape.vertices[shape.draw_progress];
+      draw_point(v,shape.size,shape.color)
+      shape.draw_progress = i
     },DDT * i)
   }
 }
+
+//@ts-ignore
+window.draw= draw
+
+function preserve_drawed_shapes() {
+  for (const shape of shapes) {
+    for (let i = 0; i < shape.draw_progress; i++) {
+      draw_point(shape.vertices[i],shape.size,shape.color)
+    }
+  }
+}
+
 
 function main() {
   draw_gradient_level = 3
@@ -153,3 +179,4 @@ function main() {
   
 }
 main()
+

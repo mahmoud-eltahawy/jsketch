@@ -10,7 +10,6 @@ function generateRandomRgbColor() {
 var FPS = 180;
 var TOTAL_FRAMES = 1000;
 var DDT = 1000 / FPS;
-var colors = Array.from({ length: 100 }, () => generateRandomRgbColor());
 var scale_x = 10;
 var scale_y = 10;
 var DDX = 2 * scale_x / TOTAL_FRAMES;
@@ -27,7 +26,8 @@ function resize() {
   clear();
 }
 addEventListener("resize", resize);
-function normailze({ x, y }) {
+function normailze(vec2) {
+  const { x, y } = vec2;
   const zero = size() / 2;
   return {
     x: zero * (1 + x / scale_x),
@@ -64,7 +64,7 @@ function draw_gradient() {
     return;
   }
   if (![1, 2, 3].includes(draw_gradient_level)) {
-    throw `draw gradient level should be 1 , 2 , 3 or undefined but it = ${draw_gradient_level}`;
+    throw `draw gradient level should be 1 , 2 , 3 or null but it = ${draw_gradient_level}`;
   }
   if (draw_gradient_level >= 1) {
     draw_line({ x: -scale_x, y: 0 }, { x: scale_x, y: 0 }, 3);
@@ -92,9 +92,10 @@ function draw_gradient() {
 function clear() {
   clear_background();
   draw_gradient();
+  preserve_drawed_shapes();
 }
 var shapes = [];
-window.F = function(fun, miror_x = false, miror_y = false) {
+var F = function(fun, miror_x = false, miror_y = false) {
   let x = -scale_x;
   let vertices = [];
   for (let i = 0;i < TOTAL_FRAMES; i++) {
@@ -116,23 +117,41 @@ window.F = function(fun, miror_x = false, miror_y = false) {
   shapes.push({
     vertices,
     draw_progress: 0,
-    color: colors[index % colors.length],
+    color: generateRandomRgbColor(),
     tf: miror_x && miror_y ? 3 : miror_x || miror_y ? 2 : 1,
     size: 2
   });
   return index;
 };
-window.draw = function(index) {
-  const shape = shapes.at(index);
+window.F = F;
+var Circle = function(radius) {
+  if (!radius) {
+    throw "radius cannot be null or zero";
+  }
+  return F((x) => Math.sqrt(radius ** 2 - x ** 2), true);
+};
+window.Circle = Circle;
+var draw = function(index) {
+  const shape = shapes[index];
   if (!shape) {
     throw "shape is not initialzied";
   }
-  for (let i = 0;i < TOTAL_FRAMES; i++) {
+  for (let i = 0;i < shape.vertices.length; i++) {
     setTimeout(() => {
-      draw_point(shape.vertices[i], shape.size, shape.color);
+      const v = shape.vertices[shape.draw_progress];
+      draw_point(v, shape.size, shape.color);
+      shape.draw_progress = i;
     }, DDT * i);
   }
 };
+window.draw = draw;
+function preserve_drawed_shapes() {
+  for (const shape of shapes) {
+    for (let i = 0;i < shape.draw_progress; i++) {
+      draw_point(shape.vertices[i], shape.size, shape.color);
+    }
+  }
+}
 function main() {
   draw_gradient_level = 3;
   resize();
