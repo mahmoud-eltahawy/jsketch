@@ -1,14 +1,22 @@
-const FPS = 180;
-const TOTAL_FRAMES = 1000;
-const TOTAL_SECONDS = TOTAL_FRAMES / FPS;
-const DDT = 1000 / FPS;
-const colors = ["#FFFF77", "#FF2000", "#EEFF00", "#EE9999", "#88DD88", "#DD88DD"];
-let scale_x = 10;
-let scale_y = 10;
-const DDX = 2 * scale_x / TOTAL_FRAMES;
-const draw_box = document.getElementById("box");
-const ctx = draw_box.getContext("2d");
-let draw_gradient_level = 3;
+// utils.ts
+function generateRandomRgbColor() {
+  const r = Math.floor(Math.random() * 256);
+  const g = Math.floor(Math.random() * 256);
+  const b = Math.floor(Math.random() * 256);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// index.ts
+var FPS = 180;
+var TOTAL_FRAMES = 1000;
+var DDT = 1000 / FPS;
+var colors = Array.from({ length: 100 }, () => generateRandomRgbColor());
+var scale_x = 10;
+var scale_y = 10;
+var DDX = 2 * scale_x / TOTAL_FRAMES;
+var draw_box = document.getElementById("box");
+var ctx = draw_box.getContext("2d");
+var draw_gradient_level = 3;
 function size() {
   return Math.min(window.innerHeight, window.innerWidth);
 }
@@ -32,10 +40,10 @@ function draw_text(vec2, text, font_size = 14, color = "#00FFFF") {
   ctx.font = `${font_size}px sans-serif`;
   ctx.fillText(text, x, y);
 }
-function draw_point(vec2, size = 10, color = "#00FF00") {
+function draw_point(vec2, size2 = 10, color = "#00FF00") {
   const { x, y } = normailze(vec2);
   ctx.fillStyle = color;
-  ctx.fillRect(x - size / 2, y - size / 2, size, size);
+  ctx.fillRect(x - size2 / 2, y - size2 / 2, size2, size2);
 }
 function draw_line(begin, end, width = 2, color = "#FFFFFF") {
   const nbegin = normailze(begin);
@@ -85,8 +93,8 @@ function clear() {
   clear_background();
   draw_gradient();
 }
-const shapes = [];
-function F(fun, miror_x = false, miror_y = false) {
+var shapes = [];
+window.F = function(fun, miror_x = false, miror_y = false) {
   let x = -scale_x;
   let vertices = [];
   for (let i = 0;i < TOTAL_FRAMES; i++) {
@@ -113,8 +121,8 @@ function F(fun, miror_x = false, miror_y = false) {
     size: 2
   });
   return index;
-}
-function draw(index) {
+};
+window.draw = function(index) {
   const shape = shapes.at(index);
   if (!shape) {
     throw "shape is not initialzied";
@@ -124,7 +132,7 @@ function draw(index) {
       draw_point(shape.vertices[i], shape.size, shape.color);
     }, DDT * i);
   }
-}
+};
 function main() {
   draw_gradient_level = 3;
   resize();

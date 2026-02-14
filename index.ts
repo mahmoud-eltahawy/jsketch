@@ -1,9 +1,10 @@
+import { Shape, Vec2 } from "./types";
+import { generateRandomRgbColor } from "./utils";
 
 const FPS = 180
 const TOTAL_FRAMES = 1000
-const TOTAL_SECONDS = TOTAL_FRAMES / FPS
 const DDT = 1000/FPS
-const colors = ["#FFFF77", "#FF2000", "#EEFF00", "#EE9999", "#88DD88", "#DD88DD"];
+const colors = Array.from({length : 100},() => generateRandomRgbColor());
 
 let scale_x = 10
 let scale_y = 10
@@ -101,22 +102,10 @@ function clear() {
   draw_gradient()
 }
 
-type Vec2 = {
-  x : number,
-  y : number
-}
-
-type Shape = {
-  vertices : Vec2[],
-  draw_progress : number,
-  color : string,
-  tf : 1 | 2 | 3,
-  size : number
-}
-
 const shapes : Shape[] = []
 
-function F(fun : (_: number) => number,miror_x = false,miror_y = false) : number{
+//@ts-ignore
+window.F = function (fun : (_: number) => number,miror_x = false,miror_y = false) : number{
   let x = -scale_x
   let vertices : Vec2[]= []
   for (let i = 0; i < TOTAL_FRAMES; i++) {
@@ -145,7 +134,8 @@ function F(fun : (_: number) => number,miror_x = false,miror_y = false) : number
   return index
 }
 
-function draw(index : number) {
+//@ts-ignore
+window.draw =function (index : number) {
   const shape = shapes.at(index)
   if (!shape) {
     throw "shape is not initialzied"
