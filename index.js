@@ -125,10 +125,24 @@ var F = function(fun, miror_x = false, miror_y = false) {
 };
 window.F = F;
 var Circle = function(radius) {
-  if (!radius) {
-    throw "radius cannot be null or zero";
+  let angle = 0;
+  const d_angle = Math.PI / 1000;
+  const vertices = [];
+  while (angle <= 2 * Math.PI) {
+    const x = radius * Math.cos(angle);
+    const y = radius * Math.sin(angle);
+    vertices.push({ x, y });
+    angle += d_angle;
   }
-  return F((x) => Math.sqrt(radius ** 2 - x ** 2), true);
+  const index = shapes.length;
+  shapes.push({
+    vertices,
+    draw_progress: 0,
+    color: generateRandomRgbColor(),
+    tf: 1,
+    size: 2
+  });
+  return index;
 };
 window.Circle = Circle;
 var draw = function(index) {
