@@ -11,7 +11,7 @@ const DDX = 2 * scale_x / TOTAL_FRAMES
 
 const draw_box = document.getElementById("box") as HTMLCanvasElement
 const ctx = draw_box.getContext("2d")!
-
+let draw_gradient_level : null | 1| 2|3 = 3
 function size() : number {
   return Math.min(window.innerHeight,window.innerWidth)
 }
@@ -22,7 +22,6 @@ function resize() {
   draw_box.height = s
   clear()
 }
-resize()
 
 addEventListener("resize",resize)
 
@@ -32,6 +31,13 @@ function normailze({x,y} : Vec2) : Vec2 {
     x : zero * ( 1 + x/scale_x),
     y : zero * ( 1 - y/scale_y)
   }
+}
+
+function draw_text(vec2 : Vec2,text : string, font_size = 14, color = "#00FFFF") {
+    const {x,y} = normailze(vec2)
+    ctx.fillStyle = color;
+    ctx.font = `${font_size}px sans-serif`;
+    ctx.fillText(text, x, y);
 }
 
 function draw_point(vec2 : Vec2,size = 10,color = "#00FF00") {
@@ -51,22 +57,49 @@ function draw_line(begin : Vec2,end: Vec2,width = 2, color = "#FFFFFF") {
   ctx.stroke()
 }
 
-function clear() {
+function clear_background() {
   ctx.fillStyle = "#000000"
   ctx.fillRect(0,0,size(),size())
-  draw_line({x : -scale_x,y : 0},{x : scale_x, y : 0},3)
-  draw_line({y : -scale_y,x : 0},{y : scale_y, x : 0},3)
+}
+
+function draw_gradient() {
+  if (!draw_gradient_level) {
+    return
+  }
+
+  if (![1,2,3].includes(draw_gradient_level)) {
+    throw `draw gradient level should be 1 , 2 , 3 or undefined but it = ${draw_gradient_level}`
+  }
+
+  if (draw_gradient_level >= 1) {
+    draw_line({x : -scale_x,y : 0},{x : scale_x, y : 0},3)
+    draw_line({y : -scale_y,x : 0},{y : scale_y, x : 0},3)
+  }
 
   for (let i = -scale_y; i <= scale_y; i++) {
-    draw_line({x : -scale_x,y : i},{x : scale_x,y : i},1)
-    draw_line({x : -scale_x,y : i + 0.5},{x : scale_x,y : i + 0.5},0.3)
+    draw_text({x : 0,y : i},i.toString());
+    if (draw_gradient_level >= 2) {
+      draw_line({x : -scale_x,y : i},{x : scale_x,y : i},1)
+    }
+    if (draw_gradient_level === 3) {
+      draw_line({x : -scale_x,y : i + 0.5},{x : scale_x,y : i + 0.5},0.3)
+    }
   }
   for (let i = -scale_x; i <= scale_x; i++) {
-    draw_line({y : -scale_y,x : i},{y : scale_y,x : i},1)
-    draw_line({y : -scale_y,x : i + 0.5},{y : scale_y,x : i + 0.5},0.3)
+    draw_text({x : i,y : 0},i.toString());
+    if (draw_gradient_level >= 2) {
+      draw_line({y : -scale_y,x : i},{y : scale_y,x : i},1)
+    }
+    if (draw_gradient_level === 3) {
+      draw_line({y : -scale_y,x : i + 0.5},{y : scale_y,x : i + 0.5},0.3)
+    }
   }
 }
-clear()
+
+function clear() {
+  clear_background()
+  draw_gradient()
+}
 
 type Vec2 = {
   x : number,
@@ -123,3 +156,10 @@ function draw(index : number) {
     },DDT * i)
   }
 }
+
+function main() {
+  draw_gradient_level = 3
+  resize()
+  
+}
+main()
