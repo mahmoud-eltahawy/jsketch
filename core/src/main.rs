@@ -1,4 +1,8 @@
-use std::{ops::Range, time::Instant};
+use std::{
+    ops::Range,
+    thread::{self, sleep},
+    time::{Duration, Instant},
+};
 
 use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
@@ -6,6 +10,7 @@ use bevy::{
     prelude::*,
 };
 use coordientates::CoordinatesPlugin;
+use crossbeam_channel::{Receiver, bounded};
 
 mod coordientates;
 
@@ -15,6 +20,7 @@ fn main() -> AppExit {
         .add_plugins((DefaultPlugins, FreeCameraPlugin, CoordinatesPlugin))
         .add_systems(Startup, start)
         .add_systems(Update, animate_shapes)
+        .add_systems(Update, animate_new_shapes)
         .run()
 }
 
@@ -24,7 +30,24 @@ fn start(mut commands: Commands) {
         Transform::from_xyz(1., 1., 8.).looking_at(Vec3::ZERO, Vec3::Y),
         FreeCamera::default(),
     ));
+    let (tx, rx) = bounded::<Shape>(1);
+    thread::spawn(move || {
+        let mut i = 3.0;
+        loop {
+            sleep(Duration::from_secs(5));
+            tx.send(Shape::Circle(CircleShape {
+                radius: i,
+                ..CircleShape::default()
+            }))
+            .unwrap();
+            i += 3.
+        }
+    });
+    commands.insert_resource(ShapeReciver(rx));
 }
+
+#[derive(Resource)]
+struct ShapeReciver(Receiver<Shape>);
 
 enum Shape {
     Sin(SinShape),
@@ -65,33 +88,45 @@ impl Default for CircleShape {
 
 fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
-        match shape {
-            Shape::Sin(ss) => {
-                let x = ss.begin.elapsed().as_secs_f32();
-                let start = ss.range.start;
-                let end = ss.range.end;
-                let x = start + x;
-                if x <= end {
-                    let y = ss.amplitude * (x * ss.frequency).sin();
-                    ss.verts.push(Vec3 { x, y, z: 0. });
-                }
-                gizmos.linestrip(ss.verts.clone(), GREEN);
-            }
-            Shape::Circle(cs) => {
-                let angle = cs.begin.elapsed().as_secs_f32() * cs.speed;
-                if angle <= 363. {
-                    cs.angle = angle;
-                }
+        handle_shape(&mut gizmos, shape);
+    }
+}
 
-                gizmos
-                    .arc_3d(
-                        cs.angle.to_radians(),
-                        cs.radius,
-                        Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
-                        RED,
-                    )
-                    .resolution(1000);
+fn animate_new_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
+    for shape in reciver.0.try_iter() {
+        shapes.0.push(shape);
+        let mut shape = shapes.0.last_mut().unwrap();
+        handle_shape(&mut gizmos, &mut shape);
+    }
+}
+
+fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
+    match shape {
+        Shape::Sin(ss) => {
+            let x = ss.begin.elapsed().as_secs_f32();
+            let start = ss.range.start;
+            let end = ss.range.end;
+            let x = start + x;
+            if x <= end {
+                let y = ss.amplitude * (x * ss.frequency).sin();
+                ss.verts.push(Vec3 { x, y, z: 0. });
             }
+            gizmos.linestrip(ss.verts.clone(), GREEN);
+        }
+        Shape::Circle(cs) => {
+            let angle = cs.begin.elapsed().as_secs_f32() * cs.speed;
+            if angle <= 363. {
+                cs.angle = angle;
+            }
+
+            gizmos
+                .arc_3d(
+                    cs.angle.to_radians(),
+                    cs.radius,
+                    Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
+                    RED,
+                )
+                .resolution(1000);
         }
     }
 }
