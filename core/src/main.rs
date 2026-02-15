@@ -1,19 +1,21 @@
+use std::{ops::Range, time::Instant};
+
 use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
-    color::palettes::css::RED,
+    color::palettes::css::{GREEN, RED},
     prelude::*,
 };
+use coordientates::CoordinatesPlugin;
+
 mod coordientates;
 
 fn main() -> AppExit {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            FreeCameraPlugin,
-            coordientates::CoordinatesPlugin,
-        ))
+        .init_resource::<SinShape>()
+        .init_resource::<CircleShape>()
+        .add_plugins((DefaultPlugins, FreeCameraPlugin, CoordinatesPlugin))
         .add_systems(Startup, start)
-        .add_systems(Update, animate_circle)
+        .add_systems(Update, (animate_circle, animate_sins))
         .run()
 }
 
@@ -25,21 +27,72 @@ fn start(mut commands: Commands) {
     ));
 }
 
-fn animate_circle(mut gizmos: Gizmos, time: Res<Time>) {
-    // Animate radius over time
-    let mut angle = time.elapsed_secs() * 30.;
+#[derive(Resource)]
+struct CircleShape {
+    begin: Instant,
+    angle: f32,
+    radius: f32,
+    center: Vec3,
+    speed: f32,
+}
 
-    if angle > 360. {
-        angle = 360.;
-    };
-    // Draw a green circle at the center
-    // gizmos.circle_2d(Vec2::ZERO, radius, Color::srgb(0.0, 1.0, 0.0));
+impl Default for CircleShape {
+    fn default() -> Self {
+        Self {
+            begin: Instant::now(),
+            angle: 0.,
+            radius: 2.,
+            center: Vec3::ZERO,
+            speed: 60.,
+        }
+    }
+}
+
+fn animate_circle(mut gizmos: Gizmos, mut cs: ResMut<CircleShape>) {
+    let angle = cs.begin.elapsed().as_secs_f32() * cs.speed;
+    if angle <= 363. {
+        cs.angle = angle;
+    }
+
     gizmos
         .arc_3d(
-            angle.to_radians(),
-            1.0,
-            Isometry3d::from_rotation(Quat::from_rotation_x(90.)),
+            cs.angle.to_radians(),
+            cs.radius,
+            Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
             RED,
         )
         .resolution(1000);
+}
+
+#[derive(Resource)]
+struct SinShape {
+    begin: Instant,
+    verts: Vec<Vec3>,
+    amplitude: f32,
+    frequency: f32,
+    range: Range<f32>,
+}
+
+impl Default for SinShape {
+    fn default() -> Self {
+        Self {
+            begin: Instant::now(),
+            verts: Default::default(),
+            amplitude: 3.,
+            frequency: 3.,
+            range: (-10.0..10.0),
+        }
+    }
+}
+
+fn animate_sins(mut gizmos: Gizmos, mut ss: ResMut<SinShape>) {
+    let x = ss.begin.elapsed().as_secs_f32();
+    let start = ss.range.start;
+    let end = ss.range.end;
+    let x = start + x;
+    if x <= end {
+        let y = ss.amplitude * (x * ss.frequency).sin();
+        ss.verts.push(Vec3 { x, y, z: 0. });
+    }
+    gizmos.linestrip(ss.verts.clone(), GREEN);
 }
