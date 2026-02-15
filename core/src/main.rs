@@ -11,11 +11,10 @@ mod coordientates;
 
 fn main() -> AppExit {
     App::new()
-        .init_resource::<SinShape>()
-        .init_resource::<CircleShape>()
+        .init_resource::<Shapes>()
         .add_plugins((DefaultPlugins, FreeCameraPlugin, CoordinatesPlugin))
         .add_systems(Startup, start)
-        .add_systems(Update, (animate_circle, animate_sins))
+        .add_systems(Update, animate_shapes)
         .run()
 }
 
@@ -27,7 +26,23 @@ fn start(mut commands: Commands) {
     ));
 }
 
+enum Shape {
+    Sin(SinShape),
+    Circle(CircleShape),
+}
+
 #[derive(Resource)]
+struct Shapes(Vec<Shape>);
+
+impl Default for Shapes {
+    fn default() -> Self {
+        Self(vec![
+            Shape::Circle(CircleShape::default()),
+            Shape::Sin(SinShape::default()),
+        ])
+    }
+}
+
 struct CircleShape {
     begin: Instant,
     angle: f32,
@@ -48,23 +63,39 @@ impl Default for CircleShape {
     }
 }
 
-fn animate_circle(mut gizmos: Gizmos, mut cs: ResMut<CircleShape>) {
-    let angle = cs.begin.elapsed().as_secs_f32() * cs.speed;
-    if angle <= 363. {
-        cs.angle = angle;
-    }
+fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
+    for shape in &mut shapes.0 {
+        match shape {
+            Shape::Sin(ss) => {
+                let x = ss.begin.elapsed().as_secs_f32();
+                let start = ss.range.start;
+                let end = ss.range.end;
+                let x = start + x;
+                if x <= end {
+                    let y = ss.amplitude * (x * ss.frequency).sin();
+                    ss.verts.push(Vec3 { x, y, z: 0. });
+                }
+                gizmos.linestrip(ss.verts.clone(), GREEN);
+            }
+            Shape::Circle(cs) => {
+                let angle = cs.begin.elapsed().as_secs_f32() * cs.speed;
+                if angle <= 363. {
+                    cs.angle = angle;
+                }
 
-    gizmos
-        .arc_3d(
-            cs.angle.to_radians(),
-            cs.radius,
-            Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
-            RED,
-        )
-        .resolution(1000);
+                gizmos
+                    .arc_3d(
+                        cs.angle.to_radians(),
+                        cs.radius,
+                        Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
+                        RED,
+                    )
+                    .resolution(1000);
+            }
+        }
+    }
 }
 
-#[derive(Resource)]
 struct SinShape {
     begin: Instant,
     verts: Vec<Vec3>,
@@ -83,16 +114,4 @@ impl Default for SinShape {
             range: (-10.0..10.0),
         }
     }
-}
-
-fn animate_sins(mut gizmos: Gizmos, mut ss: ResMut<SinShape>) {
-    let x = ss.begin.elapsed().as_secs_f32();
-    let start = ss.range.start;
-    let end = ss.range.end;
-    let x = start + x;
-    if x <= end {
-        let y = ss.amplitude * (x * ss.frequency).sin();
-        ss.verts.push(Vec3 { x, y, z: 0. });
-    }
-    gizmos.linestrip(ss.verts.clone(), GREEN);
 }
