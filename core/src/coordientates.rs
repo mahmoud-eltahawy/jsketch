@@ -51,7 +51,7 @@ pub struct CoordinatesPlugin;
 impl Plugin for CoordinatesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AxisResource>()
-            .add_systems(Update, (draw_axis, draw_planes));
+            .add_systems(Update, (draw_planes, draw_axis));
     }
 }
 
