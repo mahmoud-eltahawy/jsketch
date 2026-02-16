@@ -12,8 +12,10 @@ pub struct ShapesPlugin;
 
 impl Plugin for ShapesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, prepare_channels)
-            .init_resource::<Shapes>()
+        let (tx, rx) = bounded::<Shape>(100);
+        app.init_resource::<Shapes>()
+            .insert_resource(ShapeReciver(rx))
+            .insert_resource(ShapeSender(tx))
             .add_systems(
                 Update,
                 (animate_shapes, re_execute_the_script, animate_new_shapes),
@@ -21,26 +23,13 @@ impl Plugin for ShapesPlugin {
     }
 }
 
-fn prepare_channels(mut commands: Commands) {
-    let (tx, rx) = bounded::<Shape>(1);
-    commands.insert_resource(ShapeReciver(rx));
-    commands.insert_resource(ShapeSender(tx));
-}
-
 fn re_execute_the_script(keys: Res<ButtonInput<KeyCode>>, sender: Res<ShapeSender>) {
     if keys.just_pressed(KeyCode::Enter) {
-        sender
-            .0
-            .send(Shape::Circle(CircleShape {
-                radius: 5.,
-                ..CircleShape::default()
-            }))
-            .unwrap();
-        execute_script();
+        execute_script(sender.0.clone());
     }
 }
 
-fn execute_script() {
+fn execute_script(sender: Sender<Shape>) {
     let mut args = std::env::args();
     let program_name = args.next().expect("program must exist!!");
     let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
@@ -53,7 +42,37 @@ fn execute_script() {
 
     let mut engine = Engine::new();
 
-    engine.register_fn("rust-multiply", |a: i64, b: i64| a * b);
+    let sender2 = sender.clone();
+    engine.register_fn(
+        "SinShape",
+        move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
+            let ss = SinShape {
+                begin: Instant::now(),
+                verts: Vec::new(),
+                amplitude: amplitude as f32,
+                frequency: frequency as f32,
+                range: range_begin as f32..range_end as f32,
+            };
+            sender2.send(Shape::Sin(dbg!(ss))).unwrap();
+        },
+    );
+    engine.register_fn(
+        "CircleShape",
+        move |radius: i64, x: i64, y: i64, z: i64, speed: i64| {
+            let ss = CircleShape {
+                begin: Instant::now(),
+                angle: 0.0,
+                radius: radius as f32,
+                center: Vec3 {
+                    x: x as f32,
+                    y: y as f32,
+                    z: z as f32,
+                },
+                speed: speed as f32,
+            };
+            sender.send(Shape::Circle(dbg!(ss))).unwrap();
+        },
+    );
 
     let script = fs::read_to_string(&path).unwrap();
     println!("Executing: {}\n", path.display());
@@ -80,18 +99,10 @@ enum Shape {
     Circle(CircleShape),
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct Shapes(Vec<Shape>);
 
-impl Default for Shapes {
-    fn default() -> Self {
-        Self(vec![
-            Shape::Circle(CircleShape::default()),
-            Shape::Sin(SinShape::default()),
-        ])
-    }
-}
-
+#[derive(Debug)]
 struct CircleShape {
     begin: Instant,
     angle: f32,
@@ -118,11 +129,9 @@ fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     }
 }
 
-fn animate_new_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
+fn animate_new_shapes(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
     for shape in reciver.0.try_iter() {
         shapes.0.push(shape);
-        let mut shape = shapes.0.last_mut().unwrap();
-        handle_shape(&mut gizmos, &mut shape);
     }
 }
 
@@ -157,6 +166,7 @@ fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
     }
 }
 
+#[derive(Debug)]
 struct SinShape {
     begin: Instant,
     verts: Vec<Vec3>,
@@ -164,6 +174,8 @@ struct SinShape {
     frequency: f32,
     range: Range<f32>,
 }
+
+impl SinShape {}
 
 impl Default for SinShape {
     fn default() -> Self {

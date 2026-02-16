@@ -2034,6 +2034,7 @@ dependencies = [
  "crossbeam-channel",
  "log",
  "steel-core",
+ "steel-derive",
  "tracing",
 ]
 
