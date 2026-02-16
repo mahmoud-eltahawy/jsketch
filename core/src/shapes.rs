@@ -1,29 +1,66 @@
 use bevy::color::palettes::css::{GREEN, RED};
 use bevy::prelude::*;
-use crossbeam_channel::{Receiver, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
+use std::fs;
 use std::ops::Range;
-use std::thread::{self, sleep};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Instant;
+use steel::steel_vm::engine::Engine;
+use steel::steel_vm::register_fn::RegisterFn;
 
 pub fn prepare_channels(mut commands: Commands) {
     let (tx, rx) = bounded::<Shape>(1);
-    thread::spawn(move || {
-        let mut i = 3.0;
-        loop {
-            sleep(Duration::from_secs(5));
-            tx.send(Shape::Circle(CircleShape {
-                radius: i,
+    commands.insert_resource(ShapeReciver(rx));
+    commands.insert_resource(ShapeSender(tx));
+}
+
+pub fn re_execute_the_script(keys: Res<ButtonInput<KeyCode>>, sender: Res<ShapeSender>) {
+    if keys.just_pressed(KeyCode::Enter) {
+        sender
+            .0
+            .send(Shape::Circle(CircleShape {
+                radius: 5.,
                 ..CircleShape::default()
             }))
             .unwrap();
-            i += 3.
+        execute_script();
+    }
+}
+
+fn execute_script() {
+    let mut args = std::env::args();
+    let program_name = args.next().expect("program must exist!!");
+    let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
+        Some(path) => path,
+        None => {
+            eprintln!("Usage: {} <script.scm>", program_name);
+            std::process::exit(1);
         }
-    });
-    commands.insert_resource(ShapeReciver(rx));
+    };
+
+    let mut engine = Engine::new();
+
+    engine.register_fn("rust-multiply", |a: i64, b: i64| a * b);
+
+    let script = fs::read_to_string(&path).unwrap();
+    println!("Executing: {}\n", path.display());
+
+    match engine.run(script) {
+        Ok(results) => {
+            println!("--- Results ---");
+            for (i, val) in results.iter().enumerate() {
+                println!("[{i}] {val:?}");
+            }
+        }
+        Err(e) => eprintln!("Error during execution: {}", e),
+    }
 }
 
 #[derive(Resource)]
 pub struct ShapeReciver(Receiver<Shape>);
+
+#[derive(Resource)]
+pub struct ShapeSender(Sender<Shape>);
 
 pub enum Shape {
     Sin(SinShape),
