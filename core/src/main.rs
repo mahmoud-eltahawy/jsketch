@@ -4,22 +4,20 @@ use bevy::{
 };
 use coordientates::CoordinatesPlugin;
 
-use crate::shapes::{
-    Shapes, animate_new_shapes, animate_shapes, prepare_channels, re_execute_the_script,
-};
+use crate::shapes::ShapesPlugin;
 
 mod coordientates;
 mod shapes;
 
 fn main() -> AppExit {
     App::new()
-        .init_resource::<Shapes>()
-        .add_plugins((DefaultPlugins, FreeCameraPlugin, CoordinatesPlugin))
-        .add_systems(Startup, (setup_camera, prepare_channels))
-        .add_systems(
-            Update,
-            (animate_shapes, re_execute_the_script, animate_new_shapes),
-        )
+        .add_plugins((
+            DefaultPlugins,
+            FreeCameraPlugin,
+            CoordinatesPlugin,
+            ShapesPlugin,
+        ))
+        .add_systems(Startup, setup_camera)
         .run()
 }
 

@@ -8,13 +8,26 @@ use std::time::Instant;
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 
-pub fn prepare_channels(mut commands: Commands) {
+pub struct ShapesPlugin;
+
+impl Plugin for ShapesPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, prepare_channels)
+            .init_resource::<Shapes>()
+            .add_systems(
+                Update,
+                (animate_shapes, re_execute_the_script, animate_new_shapes),
+            );
+    }
+}
+
+fn prepare_channels(mut commands: Commands) {
     let (tx, rx) = bounded::<Shape>(1);
     commands.insert_resource(ShapeReciver(rx));
     commands.insert_resource(ShapeSender(tx));
 }
 
-pub fn re_execute_the_script(keys: Res<ButtonInput<KeyCode>>, sender: Res<ShapeSender>) {
+fn re_execute_the_script(keys: Res<ButtonInput<KeyCode>>, sender: Res<ShapeSender>) {
     if keys.just_pressed(KeyCode::Enter) {
         sender
             .0
@@ -57,18 +70,18 @@ fn execute_script() {
 }
 
 #[derive(Resource)]
-pub struct ShapeReciver(Receiver<Shape>);
+struct ShapeReciver(Receiver<Shape>);
 
 #[derive(Resource)]
-pub struct ShapeSender(Sender<Shape>);
+struct ShapeSender(Sender<Shape>);
 
-pub enum Shape {
+enum Shape {
     Sin(SinShape),
     Circle(CircleShape),
 }
 
 #[derive(Resource)]
-pub(crate) struct Shapes(Vec<Shape>);
+struct Shapes(Vec<Shape>);
 
 impl Default for Shapes {
     fn default() -> Self {
@@ -79,12 +92,12 @@ impl Default for Shapes {
     }
 }
 
-pub(crate) struct CircleShape {
-    pub(crate) begin: Instant,
-    pub(crate) angle: f32,
-    pub(crate) radius: f32,
-    pub(crate) center: Vec3,
-    pub(crate) speed: f32,
+struct CircleShape {
+    begin: Instant,
+    angle: f32,
+    radius: f32,
+    center: Vec3,
+    speed: f32,
 }
 
 impl Default for CircleShape {
@@ -99,17 +112,13 @@ impl Default for CircleShape {
     }
 }
 
-pub(crate) fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
+fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
         handle_shape(&mut gizmos, shape);
     }
 }
 
-pub(crate) fn animate_new_shapes(
-    mut gizmos: Gizmos,
-    mut shapes: ResMut<Shapes>,
-    reciver: Res<ShapeReciver>,
-) {
+fn animate_new_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
     for shape in reciver.0.try_iter() {
         shapes.0.push(shape);
         let mut shape = shapes.0.last_mut().unwrap();
@@ -117,7 +126,7 @@ pub(crate) fn animate_new_shapes(
     }
 }
 
-pub(crate) fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
+fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
     match shape {
         Shape::Sin(ss) => {
             let x = ss.begin.elapsed().as_secs_f32();
@@ -148,7 +157,7 @@ pub(crate) fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
     }
 }
 
-pub(crate) struct SinShape {
+struct SinShape {
     pub(crate) begin: Instant,
     pub(crate) verts: Vec<Vec3>,
     pub(crate) amplitude: f32,
