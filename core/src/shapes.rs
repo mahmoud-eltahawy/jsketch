@@ -43,6 +43,7 @@ fn execute_script(sender: Sender<Shape>) {
     let mut engine = Engine::new();
 
     let sender2 = sender.clone();
+    let sender3 = sender.clone();
     engine.register_fn(
         "SinShape",
         move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
@@ -70,9 +71,12 @@ fn execute_script(sender: Sender<Shape>) {
                 },
                 speed: speed as f32,
             };
-            sender.send(Shape::Circle(dbg!(ss))).unwrap();
+            sender3.send(Shape::Circle(dbg!(ss))).unwrap();
         },
     );
+    engine.register_fn("ClearShapes", move || {
+        sender.send(Shape::Clear).unwrap();
+    });
 
     let script = fs::read_to_string(&path).unwrap();
     println!("Executing: {}\n", path.display());
@@ -97,6 +101,7 @@ struct ShapeSender(Sender<Shape>);
 enum Shape {
     Sin(SinShape),
     Circle(CircleShape),
+    Clear,
 }
 
 #[derive(Resource, Default)]
@@ -131,7 +136,14 @@ fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
 
 fn animate_new_shapes(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
     for shape in reciver.0.try_iter() {
-        shapes.0.push(shape);
+        match shape {
+            Shape::Clear => {
+                shapes.0.clear();
+            }
+            shape => {
+                shapes.0.push(shape);
+            }
+        }
     }
 }
 
@@ -163,6 +175,7 @@ fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
                 )
                 .resolution(1000);
         }
+        Shape::Clear => (),
     }
 }
 
