@@ -158,11 +158,11 @@ fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
 }
 
 struct SinShape {
-    pub(crate) begin: Instant,
-    pub(crate) verts: Vec<Vec3>,
-    pub(crate) amplitude: f32,
-    pub(crate) frequency: f32,
-    pub(crate) range: Range<f32>,
+    begin: Instant,
+    verts: Vec<Vec3>,
+    amplitude: f32,
+    frequency: f32,
+    range: Range<f32>,
 }
 
 impl Default for SinShape {
