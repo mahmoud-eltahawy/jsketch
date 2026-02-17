@@ -13,46 +13,82 @@ pub struct ShapesPlugin;
 
 impl Plugin for ShapesPlugin {
     fn build(&self, app: &mut App) {
-        let (tx, rx) = bounded::<ShapeCommand>(100);
+        let (t_shape_x, r_shape_x) = bounded::<ShapeCommand>(100);
+        let (t_ex_x, r_ex_x) = bounded::<Execute>(100);
+        let path = program_path();
         app.init_resource::<Shapes>()
-            .insert_resource(ShapeReciver(rx))
-            .insert_resource(ShapeSender(Arc::new(tx)))
+            .insert_resource(ShapeReciver(r_shape_x))
+            .insert_resource(ShapeSender(Arc::new(t_shape_x)))
+            .insert_resource(ExecuteReciver(r_ex_x))
+            .insert_resource(ExecuteSender(t_ex_x))
             .insert_resource(Start(Instant::now()))
+            .insert_resource(ProgramPath(path))
             .add_systems(
                 Update,
-                (draw_shapes, re_execute_the_script, execute_shape_command),
+                (
+                    script_system.run_if(run_once),
+                    draw_shapes,
+                    execute_shape_command,
+                    handle_key_press,
+                ),
             );
     }
+}
+
+fn script_system(
+    reciver: Res<ExecuteReciver>,
+    sender: Res<ShapeSender>,
+    start: Res<Start>,
+    program_path: Res<ProgramPath>,
+) {
+    let reciver = reciver.0.clone();
+    let sender = sender.0.clone();
+    let start = start.0.clone();
+    let path = program_path.0.clone();
+    std::thread::spawn(move || {
+        let mut engine = prepare_engine(sender.clone(), start);
+        for command in reciver.iter() {
+            match command {
+                Execute::ReadAndExecute => {
+                    read_and_execute_script(&mut engine, &path);
+                }
+                Execute::ReadAndCompile => unimplemented!(),
+                Execute::ExecuteCompiled => unimplemented!(),
+            }
+        }
+    });
 }
 
 #[derive(Resource)]
 struct Start(Instant);
 
-fn re_execute_the_script(
-    keys: Res<ButtonInput<KeyCode>>,
-    sender: Res<ShapeSender>,
-    start: Res<Start>,
-) {
+#[derive(Resource)]
+struct ProgramPath(PathBuf);
+
+fn handle_key_press(keys: Res<ButtonInput<KeyCode>>, sender: Res<ExecuteSender>) {
     if keys.just_pressed(KeyCode::Enter) {
-        let sender = sender.0.clone();
-        let start = start.0.clone();
-        std::thread::spawn(move || {
-            execute_script(sender, start);
-        });
+        if let Err(err) = sender.0.send(Execute::ReadAndExecute) {
+            dbg!(err);
+        };
     }
 }
 
-fn execute_script(sender: Arc<Sender<ShapeCommand>>, start: Instant) {
-    let mut args = std::env::args();
-    let program_name = args.next().expect("program must exist!!");
-    let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
-        Some(path) => path,
-        None => {
-            eprintln!("Usage: {} <script.scm>", program_name);
-            std::process::exit(1);
+fn read_and_execute_script(engine: &mut Engine, path: &PathBuf) {
+    println!("reading script : {}\n", path.display());
+    let script = fs::read_to_string(path).unwrap();
+    println!("Executing: {}\n", path.display());
+    match engine.run(script) {
+        Ok(results) => {
+            println!("--- Results ---");
+            for (i, val) in results.iter().enumerate() {
+                println!("[{i}] {val:?}");
+            }
         }
-    };
+        Err(e) => eprintln!("Error during execution: {}", e),
+    }
+}
 
+fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     let mut engine = Engine::new();
 
     let sender2 = sender.clone();
@@ -99,19 +135,20 @@ fn execute_script(sender: Arc<Sender<ShapeCommand>>, start: Instant) {
     engine.register_fn("ClearShapes", move || {
         sender.send(ShapeCommand::ClearAll).unwrap();
     });
+    engine
+}
 
-    let script = fs::read_to_string(&path).unwrap();
-    println!("Executing: {}\n", path.display());
-
-    match engine.run(script) {
-        Ok(results) => {
-            println!("--- Results ---");
-            for (i, val) in results.iter().enumerate() {
-                println!("[{i}] {val:?}");
-            }
+fn program_path() -> PathBuf {
+    let mut args = std::env::args();
+    let program_name = args.next().expect("program must exist!!");
+    let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
+        Some(path) => path,
+        None => {
+            eprintln!("Usage: {} <script.scm>", program_name);
+            std::process::exit(1);
         }
-        Err(e) => eprintln!("Error during execution: {}", e),
-    }
+    };
+    path
 }
 
 #[derive(Resource)]
@@ -119,6 +156,18 @@ struct ShapeReciver(Receiver<ShapeCommand>);
 
 #[derive(Resource)]
 struct ShapeSender(Arc<Sender<ShapeCommand>>);
+
+enum Execute {
+    ReadAndCompile,
+    ExecuteCompiled,
+    ReadAndExecute,
+}
+
+#[derive(Resource)]
+struct ExecuteReciver(Receiver<Execute>);
+
+#[derive(Resource)]
+struct ExecuteSender(Sender<Execute>);
 
 enum ShapeCommand {
     ClearAll,
