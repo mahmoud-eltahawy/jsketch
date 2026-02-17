@@ -30,66 +30,68 @@ fn re_execute_the_script(keys: Res<ButtonInput<KeyCode>>, sender: Res<ShapeSende
 }
 
 fn execute_script(sender: Sender<Shape>) {
-    let mut args = std::env::args();
-    let program_name = args.next().expect("program must exist!!");
-    let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
-        Some(path) => path,
-        None => {
-            eprintln!("Usage: {} <script.scm>", program_name);
-            std::process::exit(1);
-        }
-    };
-
-    let mut engine = Engine::new();
-
-    let sender2 = sender.clone();
-    let sender3 = sender.clone();
-    engine.register_fn(
-        "SinShape",
-        move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
-            let ss = SinShape {
-                begin: Instant::now(),
-                verts: Vec::new(),
-                amplitude: amplitude as f32,
-                frequency: frequency as f32,
-                range: range_begin as f32..range_end as f32,
-            };
-            sender2.send(Shape::Sin(dbg!(ss))).unwrap();
-        },
-    );
-    engine.register_fn(
-        "CircleShape",
-        move |radius: i64, x: i64, y: i64, z: i64, speed: i64| {
-            let ss = CircleShape {
-                begin: Instant::now(),
-                angle: 0.0,
-                radius: radius as f32,
-                center: Vec3 {
-                    x: x as f32,
-                    y: y as f32,
-                    z: z as f32,
-                },
-                speed: speed as f32,
-            };
-            sender3.send(Shape::Circle(dbg!(ss))).unwrap();
-        },
-    );
-    engine.register_fn("ClearShapes", move || {
-        sender.send(Shape::Clear).unwrap();
-    });
-
-    let script = fs::read_to_string(&path).unwrap();
-    println!("Executing: {}\n", path.display());
-
-    match engine.run(script) {
-        Ok(results) => {
-            println!("--- Results ---");
-            for (i, val) in results.iter().enumerate() {
-                println!("[{i}] {val:?}");
+    std::thread::spawn(move || {
+        let mut args = std::env::args();
+        let program_name = args.next().expect("program must exist!!");
+        let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
+            Some(path) => path,
+            None => {
+                eprintln!("Usage: {} <script.scm>", program_name);
+                std::process::exit(1);
             }
+        };
+
+        let mut engine = Engine::new();
+
+        let sender2 = sender.clone();
+        let sender3 = sender.clone();
+        engine.register_fn(
+            "SinShape",
+            move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
+                let ss = SinShape {
+                    begin: Instant::now(),
+                    verts: Vec::new(),
+                    amplitude: amplitude as f32,
+                    frequency: frequency as f32,
+                    range: range_begin as f32..range_end as f32,
+                };
+                sender2.send(Shape::Sin(dbg!(ss))).unwrap();
+            },
+        );
+        engine.register_fn(
+            "CircleShape",
+            move |radius: i64, x: i64, y: i64, z: i64, speed: i64| {
+                let ss = CircleShape {
+                    begin: Instant::now(),
+                    angle: 0.0,
+                    radius: radius as f32,
+                    center: Vec3 {
+                        x: x as f32,
+                        y: y as f32,
+                        z: z as f32,
+                    },
+                    speed: speed as f32,
+                };
+                sender3.send(Shape::Circle(dbg!(ss))).unwrap();
+            },
+        );
+        engine.register_fn("ClearShapes", move || {
+            sender.send(Shape::Clear).unwrap();
+        });
+
+        let script = fs::read_to_string(&path).unwrap();
+        println!("Executing: {}\n", path.display());
+
+        match engine.run(script) {
+            Ok(results) => {
+                println!("--- Results ---");
+                for (i, val) in results.iter().enumerate() {
+                    println!("[{i}] {val:?}");
+                }
+            }
+            Err(e) => eprintln!("Error during execution: {}", e),
         }
-        Err(e) => eprintln!("Error during execution: {}", e),
-    }
+    });
 }
 
 #[derive(Resource)]
