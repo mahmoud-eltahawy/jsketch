@@ -20,7 +20,7 @@ impl Plugin for ShapesPlugin {
             .insert_resource(Start(Instant::now()))
             .add_systems(
                 Update,
-                (animate_shapes, re_execute_the_script, animate_new_shapes),
+                (draw_shapes, re_execute_the_script, execute_shape_command),
             );
     }
 }
@@ -175,13 +175,41 @@ impl Default for CircleShape {
     }
 }
 
-fn animate_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
+fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
-        handle_shape(&mut gizmos, shape);
+        let gizmos: &mut Gizmos<'_, '_> = &mut gizmos;
+        match &mut shape.form {
+            ShapeForm::Sin(ss) => {
+                let x = shape.instant.elapsed().as_secs_f32();
+                let start = ss.range.start;
+                let end = ss.range.end;
+                let x = start + x;
+                if x <= end {
+                    let y = ss.amplitude * (x * ss.frequency).sin();
+                    ss.verts.push(Vec3 { x, y, z: 0. });
+                }
+                gizmos.linestrip(ss.verts.clone(), GREEN);
+            }
+            ShapeForm::Circle(cs) => {
+                let angle = shape.instant.elapsed().as_secs_f32() * cs.speed;
+                if angle <= 363. {
+                    cs.angle = angle;
+                }
+
+                gizmos
+                    .arc_3d(
+                        cs.angle.to_radians(),
+                        cs.radius,
+                        Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
+                        RED,
+                    )
+                    .resolution(1000);
+            }
+        }
     }
 }
 
-fn animate_new_shapes(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
+fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
     for shape in reciver.0.try_iter() {
         match shape {
             ShapeCommand::ClearAll => {
@@ -193,37 +221,6 @@ fn animate_new_shapes(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
             ShapeCommand::ClearShapeWithId(id) => {
                 shapes.0.retain(|x| x.id != id as u128);
             }
-        }
-    }
-}
-
-fn handle_shape(gizmos: &mut Gizmos<'_, '_>, shape: &mut Shape) {
-    match &mut shape.form {
-        ShapeForm::Sin(ss) => {
-            let x = shape.instant.elapsed().as_secs_f32();
-            let start = ss.range.start;
-            let end = ss.range.end;
-            let x = start + x;
-            if x <= end {
-                let y = ss.amplitude * (x * ss.frequency).sin();
-                ss.verts.push(Vec3 { x, y, z: 0. });
-            }
-            gizmos.linestrip(ss.verts.clone(), GREEN);
-        }
-        ShapeForm::Circle(cs) => {
-            let angle = shape.instant.elapsed().as_secs_f32() * cs.speed;
-            if angle <= 363. {
-                cs.angle = angle;
-            }
-
-            gizmos
-                .arc_3d(
-                    cs.angle.to_radians(),
-                    cs.radius,
-                    Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
-                    RED,
-                )
-                .resolution(1000);
         }
     }
 }
