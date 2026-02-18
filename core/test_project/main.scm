@@ -23,9 +23,20 @@
 
 
 
-(define (f fx)
-  (f-shape (make-curve fx 0 3 1000)))
-
-(f square)
+; (define (f fx)
+;   (f-shape (make-curve fx 0 3 1000)))
 
 
+(define (plot-curve fx start end steps)
+  (f-shape (make-curve fx start end steps)))
+
+
+(define f
+  (case-lambda
+    [(fx)                (plot-curve fx 0 3 1000)]
+    [(fx start)          (plot-curve fx start 3 1000)]
+    [(fx start end)      (plot-curve fx start end 1000)]
+    [(fx start end steps) (plot-curve fx start end steps)]))
+
+
+(f square -6 6 3000)
