@@ -23,7 +23,6 @@ impl Plugin for ShapesPlugin {
         let path = program_path();
         app.init_resource::<Shapes>()
             .insert_resource(ShapeReciver(rx))
-            .insert_resource(ShapeSender(tx))
             .insert_resource(Start(start))
             .insert_resource(ProjectPath(path))
             .insert_resource(Vm(engine))
@@ -173,9 +172,6 @@ fn program_path() -> PathBuf {
 
 #[derive(Resource)]
 struct ShapeReciver(Receiver<ShapeCommand>);
-
-#[derive(Resource)]
-struct ShapeSender(Arc<Sender<ShapeCommand>>);
 
 enum ShapeCommand {
     ClearAll,
