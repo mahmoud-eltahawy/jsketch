@@ -11,18 +11,21 @@
 (clear-shape sid)
 
 
-(define (exp-curve)
-  (let ((start -4.0)
-        (end 4.0)
-        (steps 1000))
-    (let ((step (/ (- end start) (- steps 1))))
-      ;; Iterate from end down to start, building the flat list in correct order.
-      (let loop ((x end) (points '()))
-        (if (< x start)
-            points
-            (loop (- x step)
-                  (cons x (cons (exp x) points))))))))
+(define (make-curve f start end steps)
+  (let ((step (/ (- end start) (- steps 1))))
+    (let loop ((i 0) (acc '()))
+      (if (= i steps)
+          (reverse acc)
+          (let ((x (+ start (* i step))))
+            (let ((x-inexact (exact->inexact x)))
+              (loop (+ i 1)
+                    (cons (f x-inexact) (cons x-inexact acc)))))))))
 
 
-(f-shape (exp-curve))
+
+(define (f fx)
+  (f-shape (make-curve fx 0 3 1000)))
+
+(f square)
+
 
