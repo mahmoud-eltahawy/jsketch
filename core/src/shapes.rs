@@ -19,7 +19,7 @@ impl Plugin for ShapesPlugin {
         let (tx, rx) = bounded::<ShapeCommand>(100);
         let tx = Arc::new(tx);
         let start = Instant::now();
-        let engine = prepare_engine(tx.clone(), start.clone());
+        let engine = prepare_engine(tx.clone(), start);
         let path = program_path();
         app.init_resource::<Shapes>()
             .insert_resource(ShapeReciver(rx))
@@ -121,7 +121,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
             let id = shape.id;
             let ss = ShapeCommand::Draw(shape);
             sender2.send(ss).unwrap();
-            return id;
+            id
         },
     );
     engine.register_fn(
@@ -141,7 +141,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
             let id = shape.id;
             let ss = ShapeCommand::Draw(shape);
             sender3.send(ss).unwrap();
-            return id;
+            id
         },
     );
     engine.register_fn("clear-shape", move |id: usize| {
@@ -162,14 +162,13 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
 fn program_path() -> PathBuf {
     let mut args = env::args();
     let project_path = args.next().expect("program must exist!!");
-    let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
+    match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
         Some(path) => path,
         None => {
             eprintln!("Usage: {} <script.scm>", project_path);
             std::process::exit(1);
         }
-    };
-    path
+    }
 }
 
 #[derive(Resource)]
