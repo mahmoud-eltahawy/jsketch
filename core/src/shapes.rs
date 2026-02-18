@@ -259,7 +259,7 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
             }
             ShapeForm::FShape(fshape) => {
                 fshape.index = (fshape.index as f32)
-                    .lerp(fshape.verts.len() as f32, 0.1)
+                    .lerp(fshape.verts.len() as f32, 0.05)
                     .ceil() as usize;
                 let end = fshape.index;
                 let verts = fshape.verts[0..end].to_vec();

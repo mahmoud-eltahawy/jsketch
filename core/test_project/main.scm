@@ -9,5 +9,20 @@
 (time/sleep-ms 1000)
 (circle-shape (square 3) 1 1 1 6)
 (clear-shape sid)
-(f-shape (list 1.1 1.1 4.1 1.1 4.1 4.1 1.1 1.1))
+
+
+(define (exp-curve)
+  (let ((start -4.0)
+        (end 4.0)
+        (steps 1000))
+    (let ((step (/ (- end start) (- steps 1))))
+      ;; Iterate from end down to start, building the flat list in correct order.
+      (let loop ((x end) (points '()))
+        (if (< x start)
+            points
+            (loop (- x step)
+                  (cons x (cons (exp x) points))))))))
+
+
+(f-shape (exp-curve))
 
