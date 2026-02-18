@@ -127,7 +127,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
                     y: y as f32,
                     z: z as f32,
                 },
-                speed: speed as f32,
+                speed: (speed as f32 % 100.0) / 100.0,
             };
             let shape = Shape::circle(ss, start);
             let id = shape.id;
@@ -219,26 +219,22 @@ impl Default for CircleShape {
     }
 }
 
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
         let gizmos: &mut Gizmos<'_, '_> = &mut gizmos;
         match &mut shape.form {
             ShapeForm::Sin(ss) => {
-                let x = shape.instant.elapsed().as_secs_f32();
-                let start = ss.range.start;
-                let end = ss.range.end;
-                let x = start + x;
-                if x <= end {
-                    let y = ss.amplitude * (x * ss.frequency).sin();
-                    ss.verts.push(Vec3 { x, y, z: 0. });
-                }
+                ss.x = lerp(ss.x, ss.range.end, 0.01);
+                let y = ss.amplitude * (ss.x * ss.frequency).sin();
+                ss.verts.push(Vec3 { x: ss.x, y, z: 0.0 });
                 gizmos.linestrip(ss.verts.clone(), GREEN);
             }
             ShapeForm::Circle(cs) => {
-                let angle = shape.instant.elapsed().as_secs_f32() * cs.speed;
-                if angle <= 363. {
-                    cs.angle = angle;
-                }
+                cs.angle = lerp(cs.angle, 360.0, cs.speed);
 
                 gizmos
                     .arc_3d(
@@ -275,6 +271,7 @@ struct SinShape {
     amplitude: f32,
     frequency: f32,
     range: Range<f32>,
+    x: f32,
 }
 
 impl SinShape {
@@ -283,6 +280,7 @@ impl SinShape {
             verts: Vec::new(),
             amplitude,
             frequency,
+            x: range.start,
             range,
         }
     }
@@ -290,11 +288,13 @@ impl SinShape {
 
 impl Default for SinShape {
     fn default() -> Self {
+        let start = -10.0;
         Self {
             verts: Default::default(),
             amplitude: 3.,
             frequency: 3.,
-            range: (-10.0..10.0),
+            x: start,
+            range: (start..10.0),
         }
     }
 }
