@@ -101,6 +101,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     let sender2 = sender.clone();
     let sender3 = sender.clone();
     let sender4 = sender.clone();
+    let sender5 = sender.clone();
     engine.register_fn(
         "sin-shape",
         move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
@@ -139,6 +140,12 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     engine.register_fn("clear-shape", move |id: usize| {
         sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
     });
+    engine.register_fn("f-shape", move |verts: Vec<f32>| {
+        let shape = Shape::f(FShape::new(verts), start);
+        let id = shape.id;
+        sender5.send(ShapeCommand::Draw(shape)).unwrap();
+        id
+    });
     engine.register_fn("clear-all-shapes", move || {
         sender.send(ShapeCommand::ClearAll).unwrap();
     });
@@ -170,6 +177,7 @@ enum ShapeCommand {
     ClearShapeWithId(usize),
 }
 
+#[derive(Debug)]
 struct Shape {
     id: u128,
     instant: Instant,
@@ -190,11 +198,20 @@ impl Shape {
         let id = instant.duration_since(start).as_nanos();
         Self { id, instant, form }
     }
+
+    fn f(form: FShape, start: Instant) -> Shape {
+        let form = ShapeForm::FShape(form);
+        let instant = Instant::now();
+        let id = instant.duration_since(start).as_nanos();
+        Self { id, instant, form }
+    }
 }
 
+#[derive(Debug)]
 enum ShapeForm {
     Sin(SinShape),
     Circle(CircleShape),
+    FShape(FShape),
 }
 
 #[derive(Resource, Default)]
@@ -219,22 +236,17 @@ impl Default for CircleShape {
     }
 }
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
-        let gizmos: &mut Gizmos<'_, '_> = &mut gizmos;
         match &mut shape.form {
             ShapeForm::Sin(ss) => {
-                ss.x = lerp(ss.x, ss.range.end, 0.01);
+                ss.x = ss.x.lerp(ss.range.end, 0.01);
                 let y = ss.amplitude * (ss.x * ss.frequency).sin();
                 ss.verts.push(Vec3 { x: ss.x, y, z: 0.0 });
                 gizmos.linestrip(ss.verts.clone(), GREEN);
             }
             ShapeForm::Circle(cs) => {
-                cs.angle = lerp(cs.angle, 360.0, cs.speed);
+                cs.angle = cs.angle.lerp(360.0, cs.speed);
 
                 gizmos
                     .arc_3d(
@@ -244,6 +256,14 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
                         RED,
                     )
                     .resolution(1000);
+            }
+            ShapeForm::FShape(fshape) => {
+                fshape.index = (fshape.index as f32)
+                    .lerp(fshape.verts.len() as f32, 0.1)
+                    .ceil() as usize;
+                let end = fshape.index;
+                let verts = fshape.verts[0..end].to_vec();
+                gizmos.linestrip(verts, GREEN);
             }
         }
     }
@@ -272,6 +292,28 @@ struct SinShape {
     frequency: f32,
     range: Range<f32>,
     x: f32,
+}
+
+#[derive(Debug)]
+struct FShape {
+    verts: Vec<Vec3>,
+    index: usize,
+}
+impl FShape {
+    fn new(verts: Vec<f32>) -> Self {
+        Self {
+            verts: verts
+                .windows(2)
+                .step_by(2)
+                .map(|w| Vec3 {
+                    x: w[0],
+                    y: w[1],
+                    z: 0.,
+                })
+                .collect(),
+            index: 0,
+        }
+    }
 }
 
 impl SinShape {

@@ -9,6 +9,5 @@
 (time/sleep-ms 1000)
 (circle-shape (square 3) 1 1 1 6)
 (clear-shape sid)
-
-
+(f-shape (list 1.1 1.1 4.1 1.1 4.1 4.1 1.1 1.1))
 
