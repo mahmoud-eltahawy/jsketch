@@ -17,6 +17,7 @@ tracing = { version = "0.1", features = [
 ] }
 steel-core = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
 steel-derive = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
+notify = {version = "8", features = ["crossbeam-channel"]}
 
 # Idiomatic Bevy code often triggers these lints, and the CI workflow treats them as errors.
 # In some cases they may still signal poor code quality however, so consider commenting out these lines.
