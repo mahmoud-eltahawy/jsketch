@@ -1,10 +1,14 @@
-(ClearShapes)
-(define sid (SinShape 1 1 0 8))
+(load "./other.scm")
+
+(clear-all-shapes)
+(define sid (sin-shape 1 1 0 8))
 (time/sleep-ms 3000)
-(CircleShape 2 1 1 1 60)
+(circle-shape 2 1 1 1 60)
 (time/sleep-ms 2000)
-(CircleShape 4 1 1 1 60)
+(circle-shape 4 1 1 1 60)
 (time/sleep-ms 1000)
-(CircleShape 6 1 1 1 60)
-(ClearShape sid)
+(circle-shape (square 4) 1 1 1 60)
+(clear-shape sid)
+
+
 

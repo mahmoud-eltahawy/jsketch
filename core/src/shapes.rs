@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{fs, thread};
+use std::{env, fs, thread};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 
@@ -33,39 +33,57 @@ impl Plugin for ShapesPlugin {
     }
 }
 
+const ENTRY_SCRIPT_NAME: &str = "main.scm";
+
 fn script_system(sender: Res<ShapeSender>, start: Res<Start>, program_path: Res<ProjectPath>) {
     let sender = sender.0.clone();
     let start = start.0.clone();
     let path = program_path.0.clone();
+    let path = path.canonicalize().unwrap();
     thread::spawn(move || {
+        let is_dir = path.is_dir();
         let mut engine = prepare_engine(sender.clone(), start);
-
         let (tx, rx) = bounded::<notify::Result<notify::Event>>(1);
 
         let mut project_watcher =
             notify::recommended_watcher(tx).expect("can not watch file changes");
 
+        let watch_path = if is_dir {
+            path.clone()
+        } else {
+            path.parent().unwrap().to_path_buf()
+        };
+
         project_watcher
-            .watch(&path, notify::RecursiveMode::NonRecursive)
+            .watch(&watch_path, notify::RecursiveMode::NonRecursive)
             .unwrap();
 
         for event in rx.iter() {
             let Ok(event) = event else {
                 continue;
             };
-            if let EventKind::Modify(ModifyKind::Data(DataChange::Content))
+            if let EventKind::Modify(ModifyKind::Data(DataChange::Any))
             | EventKind::Create(CreateKind::File) = event.kind
             {
-                if !path.exists() {
-                    eprintln!("Error : source file does not exist");
+                if !watch_path.exists() {
+                    eprintln!(
+                        "Error : project source directory path {watch_path:#?} does not exist"
+                    );
                     return;
                 }
-                let main_script = path.join("main.scm");
-                let main_script = fs::read_to_string(main_script).unwrap();
-                println!("Executing: {}\n", path.display());
-                if let Err(err) = engine.run(main_script) {
+                let pwd = env::current_dir().unwrap();
+                env::set_current_dir(&watch_path).unwrap();
+                let entry_script = if is_dir {
+                    watch_path.join(ENTRY_SCRIPT_NAME)
+                } else {
+                    path.clone()
+                };
+                let script = fs::read_to_string(&entry_script).unwrap();
+                println!("Executing: {}\n", entry_script.display());
+                if let Err(err) = engine.run(script) {
                     dbg!(err);
                 };
+                env::set_current_dir(pwd).unwrap();
             }
         }
     });
@@ -84,7 +102,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     let sender3 = sender.clone();
     let sender4 = sender.clone();
     engine.register_fn(
-        "SinShape",
+        "sin-shape",
         move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
             let ss = SinShape::new(
                 amplitude as f32,
@@ -99,7 +117,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
         },
     );
     engine.register_fn(
-        "CircleShape",
+        "circle-shape",
         move |radius: i64, x: i64, y: i64, z: i64, speed: i64| {
             let ss = CircleShape {
                 angle: 0.0,
@@ -118,17 +136,17 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
             return id;
         },
     );
-    engine.register_fn("ClearShape", move |id: usize| {
+    engine.register_fn("clear-shape", move |id: usize| {
         sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
     });
-    engine.register_fn("ClearShapes", move || {
+    engine.register_fn("clear-all-shapes", move || {
         sender.send(ShapeCommand::ClearAll).unwrap();
     });
     engine
 }
 
 fn program_path() -> PathBuf {
-    let mut args = std::env::args();
+    let mut args = env::args();
     let project_path = args.next().expect("program must exist!!");
     let path = match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
         Some(path) => path,
@@ -137,9 +155,6 @@ fn program_path() -> PathBuf {
             std::process::exit(1);
         }
     };
-    if !path.is_dir() {
-        panic!("ERROR : provide project directory path");
-    }
     path
 }
 
