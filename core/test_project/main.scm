@@ -11,32 +11,4 @@
 (clear-shape sid)
 
 
-(define (make-curve f start end steps)
-  (let ((step (/ (- end start) (- steps 1))))
-    (let loop ((i 0) (acc '()))
-      (if (= i steps)
-          (reverse acc)
-          (let ((x (+ start (* i step))))
-            (let ((x-inexact (exact->inexact x)))
-              (loop (+ i 1)
-                    (cons (f x-inexact) (cons x-inexact acc)))))))))
-
-
-
-; (define (f fx)
-;   (f-shape (make-curve fx 0 3 1000)))
-
-
-(define (plot-curve fx start end steps)
-  (f-shape (make-curve fx start end steps)))
-
-
-(define f
-  (case-lambda
-    [(fx)                (plot-curve fx 0 3 1000)]
-    [(fx start)          (plot-curve fx start 3 1000)]
-    [(fx start end)      (plot-curve fx start end 1000)]
-    [(fx start end steps) (plot-curve fx start end steps)]))
-
-
 (f square -6 6 3000)

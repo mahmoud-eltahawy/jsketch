@@ -95,6 +95,29 @@ struct Start(Instant);
 #[derive(Resource)]
 struct ProjectPath(PathBuf);
 
+const HELPER_SCHEME_FUNCTIONS: &str = r#"
+(define (make-curve f start end steps)
+  (let ((step (/ (- end start) (- steps 1))))
+    (let loop ((i 0) (acc '()))
+      (if (= i steps)
+          (reverse acc)
+          (let ((x (+ start (* i step))))
+            (let ((x-inexact (exact->inexact x)))
+              (loop (+ i 1)
+                    (cons (f x-inexact) (cons x-inexact acc)))))))))
+
+(define (plot-curve fx start end steps)
+  (f-shape (make-curve fx start end steps)))
+
+
+(define f
+  (case-lambda
+    [(fx)                (plot-curve fx 0 3 1000)]
+    [(fx start)          (plot-curve fx start 3 1000)]
+    [(fx start end)      (plot-curve fx start end 1000)]
+    [(fx start end steps) (plot-curve fx start end steps)]))
+"#;
+
 fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     let mut engine = Engine::new();
 
@@ -149,6 +172,9 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     engine.register_fn("clear-all-shapes", move || {
         sender.send(ShapeCommand::ClearAll).unwrap();
     });
+    if let Err(err) = engine.run(HELPER_SCHEME_FUNCTIONS) {
+        dbg!(err);
+    };
     engine
 }
 
