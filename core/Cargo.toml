@@ -15,7 +15,7 @@ tracing = { version = "0.1", features = [
     "max_level_debug",
     "release_max_level_warn",
 ] }
-steel-core = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
+steel-core = { git = "https://github.com/mattwparas/steel.git",features =["sync"], branch = "master" }
 steel-derive = { git = "https://github.com/mattwparas/steel.git", branch = "master" }
 notify = {version = "8", features = ["crossbeam-channel"]}
 

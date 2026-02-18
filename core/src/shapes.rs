@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{env, fs, thread};
+use steel::SteelVal;
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 
@@ -15,13 +16,17 @@ pub struct ShapesPlugin;
 
 impl Plugin for ShapesPlugin {
     fn build(&self, app: &mut App) {
-        let (t_shape_x, r_shape_x) = bounded::<ShapeCommand>(100);
+        let (tx, rx) = bounded::<ShapeCommand>(100);
+        let tx = Arc::new(tx);
+        let start = Instant::now();
+        let engine = prepare_engine(tx.clone(), start.clone());
         let path = program_path();
         app.init_resource::<Shapes>()
-            .insert_resource(ShapeReciver(r_shape_x))
-            .insert_resource(ShapeSender(Arc::new(t_shape_x)))
-            .insert_resource(Start(Instant::now()))
+            .insert_resource(ShapeReciver(rx))
+            .insert_resource(ShapeSender(tx))
+            .insert_resource(Start(start))
             .insert_resource(ProjectPath(path))
+            .insert_resource(Vm(engine))
             .add_systems(
                 Update,
                 (
@@ -35,14 +40,16 @@ impl Plugin for ShapesPlugin {
 
 const ENTRY_SCRIPT_NAME: &str = "main.scm";
 
-fn script_system(sender: Res<ShapeSender>, start: Res<Start>, program_path: Res<ProjectPath>) {
-    let sender = sender.0.clone();
-    let start = start.0.clone();
+#[derive(Resource)]
+struct Vm(Engine);
+
+fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
     let path = program_path.0.clone();
     let path = path.canonicalize().unwrap();
+    let engine = vm.0.clone();
     thread::spawn(move || {
+        let mut engine = engine;
         let is_dir = path.is_dir();
-        let mut engine = prepare_engine(sender.clone(), start);
         let (tx, rx) = bounded::<notify::Result<notify::Event>>(1);
 
         let mut project_watcher =
@@ -95,29 +102,6 @@ struct Start(Instant);
 #[derive(Resource)]
 struct ProjectPath(PathBuf);
 
-const HELPER_SCHEME_FUNCTIONS: &str = r#"
-(define (make-curve f start end steps)
-  (let ((step (/ (- end start) (- steps 1))))
-    (let loop ((i 0) (acc '()))
-      (if (= i steps)
-          (reverse acc)
-          (let ((x (+ start (* i step))))
-            (let ((x-inexact (exact->inexact x)))
-              (loop (+ i 1)
-                    (cons (f x-inexact) (cons x-inexact acc)))))))))
-
-(define (plot-curve fx start end steps)
-  (f-shape (make-curve fx start end steps)))
-
-
-(define f
-  (case-lambda
-    [(fx)                (plot-curve fx 0 3 1000)]
-    [(fx start)          (plot-curve fx start 3 1000)]
-    [(fx start end)      (plot-curve fx start end 1000)]
-    [(fx start end steps) (plot-curve fx start end steps)]))
-"#;
-
 fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     let mut engine = Engine::new();
 
@@ -163,8 +147,8 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     engine.register_fn("clear-shape", move |id: usize| {
         sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
     });
-    engine.register_fn("f-shape", move |verts: Vec<f32>| {
-        let shape = Shape::f(FShape::new(verts), start);
+    engine.register_fn("f-shape", move |fun: SteelVal, begin: f32, end: f32| {
+        let shape = Shape::f(FShape::new(fun, begin, end), start);
         let id = shape.id;
         sender5.send(ShapeCommand::Draw(shape)).unwrap();
         id
@@ -172,9 +156,6 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
     engine.register_fn("clear-all-shapes", move || {
         sender.send(ShapeCommand::ClearAll).unwrap();
     });
-    if let Err(err) = engine.run(HELPER_SCHEME_FUNCTIONS) {
-        dbg!(err);
-    };
     engine
 }
 
@@ -262,7 +243,7 @@ impl Default for CircleShape {
     }
 }
 
-fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
+fn draw_shapes(mut vm: ResMut<Vm>, mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
         match &mut shape.form {
             ShapeForm::Sin(ss) => {
@@ -284,12 +265,17 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
                     .resolution(1000);
             }
             ShapeForm::FShape(fshape) => {
-                fshape.index = (fshape.index as f32)
-                    .lerp(fshape.verts.len() as f32, 0.05)
-                    .ceil() as usize;
-                let end = fshape.index;
-                let verts = fshape.verts[0..end].to_vec();
-                gizmos.linestrip(verts, GREEN);
+                let fun = fshape.fun.clone();
+                let x = fshape.begin;
+                fshape.begin = fshape.begin.lerp(fshape.end, fshape.speed);
+                let y: Option<f32> =
+                    vm.0.call_function_with_args(fun, vec![SteelVal::from(x)])
+                        .ok()
+                        .and_then(|x| x.try_into().ok());
+                if let Some(y) = y {
+                    fshape.verts.push(Vec3 { x, y, z: 0.0 });
+                }
+                gizmos.linestrip(fshape.verts.clone(), GREEN);
             }
         }
     }
@@ -323,21 +309,19 @@ struct SinShape {
 #[derive(Debug)]
 struct FShape {
     verts: Vec<Vec3>,
-    index: usize,
+    fun: SteelVal,
+    speed: f32,
+    begin: f32,
+    end: f32,
 }
 impl FShape {
-    fn new(verts: Vec<f32>) -> Self {
+    fn new(fun: SteelVal, begin: f32, end: f32) -> Self {
         Self {
-            verts: verts
-                .windows(2)
-                .step_by(2)
-                .map(|w| Vec3 {
-                    x: w[0],
-                    y: w[1],
-                    z: 0.,
-                })
-                .collect(),
-            index: 0,
+            fun,
+            verts: Vec::new(),
+            begin,
+            end,
+            speed: 0.1,
         }
     }
 }

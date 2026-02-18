@@ -10,5 +10,4 @@
 (circle-shape (square 3) 1 1 1 6)
 (clear-shape sid)
 
-
-(f square -6 6 3000)
+(f-shape square 0.0 4.0)
