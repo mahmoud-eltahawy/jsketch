@@ -108,7 +108,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         .create_function(
             move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
                 let ss = SinShape::new(amplitude, frequency, range_begin..range_end);
-                let shape = Shape::sin(ss, start);
+                let shape = Shape::new(ss, start);
                 let id = shape.id;
                 let ss = ShapeCommand::Register(shape);
                 sender2.send(ss).unwrap();
@@ -120,7 +120,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let circle_shape = lua
         .create_function(move |_, radius| {
             let ss = Circle { radius: radius };
-            let shape = Shape::circle(ss, start);
+            let shape = Shape::new(ss, start);
             let id = shape.id;
             let ss = ShapeCommand::Register(shape);
             sender3.send(ss).unwrap();
@@ -130,8 +130,8 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     globals.set("circle_shape", circle_shape).unwrap();
 
     let clear_shape = lua
-        .create_function(move |_, id: usize| {
-            sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
+        .create_function(move |_, id: u128| {
+            sender4.send(ShapeCommand::ClearShape(id)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -139,7 +139,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
 
     let f_shape = lua
         .create_function(move |_, (fun, begin, end): (Function, f32, f32)| {
-            let shape = Shape::f(FShape::new(fun, begin, end), start);
+            let shape = Shape::new(FShape::new(fun, begin, end), start);
             let id = shape.id;
             sender5.send(ShapeCommand::Register(shape)).unwrap();
             Ok(id)
@@ -201,7 +201,8 @@ enum ShapeCommand {
     Register(Shape),
     DrawAfter { id: u128, milis: u64 },
     Transition { id: u128, target: Vec3 },
-    ClearShapeWithId(usize),
+    ClearShape(u128),
+    ConvertShape { from: u128, to: u128 },
 }
 
 #[derive(Debug)]
@@ -212,23 +213,19 @@ struct Shape {
     draw_progress: usize,
     center: Vec3,
     verts: Vec<Vec3>,
-    form: ShapeForm,
 }
 
 impl Shape {
-    fn new(form: ShapeForm, start: Instant) -> Self {
+    fn new<P>(shape: P, start: Instant) -> Self
+    where
+        P: Points,
+    {
         let instant = Instant::now();
         let id = instant.duration_since(start).as_nanos();
-        let verts = match &form {
-            ShapeForm::Sin(shape) => shape.points(Vec3::ZERO),
-            ShapeForm::Circle(shape) => shape.points(Vec3::ZERO),
-            ShapeForm::FShape(shape) => shape.points(Vec3::ZERO),
-        };
         Self {
             id,
             instant,
-            verts,
-            form,
+            verts: shape.points(),
             draw_after: None,
             draw_progress: 0,
             center: Vec3::ZERO,
@@ -239,27 +236,6 @@ impl Shape {
             *v = *v + self.center;
         }
     }
-    fn sin(s: SinShape, start: Instant) -> Self {
-        let form = ShapeForm::Sin(s);
-        Self::new(form, start)
-    }
-
-    fn circle(s: Circle, start: Instant) -> Self {
-        let form = ShapeForm::Circle(s);
-        Self::new(form, start)
-    }
-
-    fn f(form: FShape, start: Instant) -> Shape {
-        let form = ShapeForm::FShape(form);
-        Self::new(form, start)
-    }
-}
-
-#[derive(Debug)]
-enum ShapeForm {
-    Sin(SinShape),
-    Circle(Circle),
-    FShape(FShape),
 }
 
 #[derive(Resource, Default)]
@@ -292,7 +268,7 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
             ShapeCommand::Register(shape) => {
                 shapes.0.push(shape);
             }
-            ShapeCommand::ClearShapeWithId(id) => {
+            ShapeCommand::ClearShape(id) => {
                 shapes.0.retain(|x| x.id != id as u128);
             }
             ShapeCommand::DrawAfter { id, milis } => {
@@ -311,12 +287,28 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
                 let Some(i) = i else {
                     continue;
                 };
-                let shape = shapes.0.get_mut(i);
-                let Some(shape) = shape else {
-                    continue;
-                };
+                let shape = shapes.0.get_mut(i).unwrap();
                 shape.center += target;
                 shape.retransition();
+            }
+            ShapeCommand::ConvertShape { from, to } => {
+                let (from_i, to_i) = {
+                    let from_i = shapes.0.iter().position(|x| x.id == from);
+                    let Some(from_i) = from_i else {
+                        continue;
+                    };
+                    let to_i = shapes.0.iter().position(|x| x.id == to);
+                    let Some(to_i) = to_i else {
+                        continue;
+                    };
+                    (from_i, to_i)
+                };
+                let from = shapes.0.get(from_i).unwrap();
+                let to = shapes.0.get(to_i).unwrap();
+
+                for i in 0..SHAPE_RESOLOUTION {
+                    todo!()
+                }
             }
         }
     }
@@ -331,11 +323,10 @@ struct SinShape {
 
 trait Points {
     fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3>;
-    fn points(&self, transiton: Vec3) -> Vec<Vec3> {
+    fn points(&self) -> Vec<Vec3> {
         (0..SHAPE_RESOLOUTION)
             .into_iter()
             .map(self.point_closure())
-            .map(|p| p + transiton)
             .collect::<Vec<_>>()
     }
 }

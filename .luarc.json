@@ -1,0 +1,10 @@
+{
+    "diagnostics.globals": [
+        "clear_all_shapes",
+        "sin_shape",
+        "circle_shape",
+        "transition",
+        "draw",
+        "f_shape"
+    ]
+}
