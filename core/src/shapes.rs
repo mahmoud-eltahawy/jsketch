@@ -103,6 +103,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let sender4 = sender.clone();
     let sender5 = sender.clone();
     let sender6 = sender.clone();
+    let sender7 = sender.clone();
     let sin_shape = lua
         .create_function(
             move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
@@ -117,11 +118,8 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         .unwrap();
     globals.set("sin_shape", sin_shape).unwrap();
     let circle_shape = lua
-        .create_function(move |_, (radius, x, y, z): (f32, f32, f32, f32)| {
-            let ss = CircleShape {
-                radius: radius,
-                center: Vec3 { x: x, y: y, z: z },
-            };
+        .create_function(move |_, radius| {
+            let ss = CircleShape { radius: radius };
             let shape = Shape::circle(ss, start);
             let id = shape.id;
             let ss = ShapeCommand::Register(shape);
@@ -159,6 +157,19 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         .unwrap();
     globals.set("draw", draw).unwrap();
 
+    let transiton = lua
+        .create_function(move |_, (id, x, y, z): (u128, f32, f32, f32)| {
+            sender7
+                .send(ShapeCommand::Transition {
+                    id,
+                    target: Vec3 { x, y, z },
+                })
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("transition", transiton).unwrap();
+
     let clear_all_shapes = lua
         .create_function(move |_, ()| {
             sender.send(ShapeCommand::ClearAll).unwrap();
@@ -189,6 +200,7 @@ enum ShapeCommand {
     ClearAll,
     Register(Shape),
     DrawAfter { id: u128, milis: u64 },
+    Transition { id: u128, target: Vec3 },
     ClearShapeWithId(usize),
 }
 
@@ -198,12 +210,12 @@ struct Shape {
     instant: Instant,
     draw_after: Option<Duration>,
     draw_progress: usize,
+    center: Vec3,
     form: ShapeForm,
 }
 
 impl Shape {
-    fn sin(s: SinShape, start: Instant) -> Self {
-        let form = ShapeForm::Sin(s);
+    fn new(form: ShapeForm, start: Instant) -> Self {
         let instant = Instant::now();
         let id = instant.duration_since(start).as_nanos();
         Self {
@@ -212,33 +224,22 @@ impl Shape {
             form,
             draw_after: None,
             draw_progress: 0,
+            center: Vec3::ZERO,
         }
+    }
+    fn sin(s: SinShape, start: Instant) -> Self {
+        let form = ShapeForm::Sin(s);
+        Self::new(form, start)
     }
 
     fn circle(s: CircleShape, start: Instant) -> Self {
         let form = ShapeForm::Circle(s);
-        let instant = Instant::now();
-        let id = instant.duration_since(start).as_nanos();
-        Self {
-            draw_after: None,
-            id,
-            instant,
-            form,
-            draw_progress: 0,
-        }
+        Self::new(form, start)
     }
 
     fn f(form: FShape, start: Instant) -> Shape {
         let form = ShapeForm::FShape(form);
-        let instant = Instant::now();
-        let id = instant.duration_since(start).as_nanos();
-        Self {
-            draw_after: None,
-            id,
-            instant,
-            form,
-            draw_progress: 0,
-        }
+        Self::new(form, start)
     }
 }
 
@@ -255,15 +256,11 @@ struct Shapes(Vec<Shape>);
 #[derive(Debug)]
 struct CircleShape {
     radius: f32,
-    center: Vec3,
 }
 
 impl Default for CircleShape {
     fn default() -> Self {
-        Self {
-            radius: 2.,
-            center: Vec3::ZERO,
-        }
+        Self { radius: 2. }
     }
 }
 
@@ -304,7 +301,7 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
                     .arc_3d(
                         angle.to_radians(),
                         cs.radius,
-                        Isometry3d::new(cs.center, Quat::from_rotation_x(90.)),
+                        Isometry3d::new(shape.center, Quat::from_rotation_x(90.)),
                         RED,
                     )
                     .resolution(1000);
@@ -350,6 +347,17 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
                     continue;
                 };
                 shape.draw_after = Some(Duration::from_millis(milis));
+            }
+            ShapeCommand::Transition { id, target } => {
+                let i = shapes.0.iter().position(|x| x.id == id);
+                let Some(i) = i else {
+                    continue;
+                };
+                let shape = shapes.0.get_mut(i);
+                let Some(shape) = shape else {
+                    continue;
+                };
+                shape.center += target;
             }
         }
     }
