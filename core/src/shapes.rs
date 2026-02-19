@@ -1,6 +1,7 @@
 use bevy::color::palettes::css::{GREEN, RED};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender, bounded};
+use mlua::{Function, Lua};
 use notify::event::{CreateKind, DataChange, ModifyKind};
 use notify::{EventKind, Watcher};
 use std::ops::Range;
@@ -8,9 +9,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{env, fs, thread};
-use steel::SteelVal;
-use steel::steel_vm::engine::Engine;
-use steel::steel_vm::register_fn::RegisterFn;
 
 pub struct ShapesPlugin;
 
@@ -37,17 +35,16 @@ impl Plugin for ShapesPlugin {
     }
 }
 
-const ENTRY_SCRIPT_NAME: &str = "main.scm";
+const ENTRY_SCRIPT_NAME: &str = "init.lua";
 
 #[derive(Resource)]
-struct Vm(Engine);
+struct Vm(Lua);
 
 fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
     let path = program_path.0.clone();
     let path = path.canonicalize().unwrap();
     let engine = vm.0.clone();
     thread::spawn(move || {
-        let mut engine = engine;
         let is_dir = path.is_dir();
         let (tx, rx) = bounded::<notify::Result<notify::Event>>(1);
 
@@ -86,7 +83,7 @@ fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
                 };
                 let script = fs::read_to_string(&entry_script).unwrap();
                 println!("Executing: {}\n", entry_script.display());
-                if let Err(err) = engine.run(script) {
+                if let Err(err) = engine.load(script).exec() {
                     dbg!(err);
                 };
                 env::set_current_dir(pwd).unwrap();
@@ -101,61 +98,73 @@ struct Start(Instant);
 #[derive(Resource)]
 struct ProjectPath(PathBuf);
 
-fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Engine {
-    let mut engine = Engine::new();
+fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
+    let lua = Lua::new();
+    let globals = lua.globals();
 
     let sender2 = sender.clone();
     let sender3 = sender.clone();
     let sender4 = sender.clone();
     let sender5 = sender.clone();
-    engine.register_fn(
-        "sin-shape",
-        move |amplitude: i64, frequency: i64, range_begin: i64, range_end: i64| {
-            let ss = SinShape::new(
-                amplitude as f32,
-                frequency as f32,
-                range_begin as f32..range_end as f32,
-            );
-            let shape = Shape::sin(ss, start);
+    let sin_shape = lua
+        .create_function(
+            move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
+                let ss = SinShape::new(amplitude, frequency, range_begin..range_end);
+                let shape = Shape::sin(ss, start);
+                let id = shape.id;
+                let ss = ShapeCommand::Draw(shape);
+                sender2.send(ss).unwrap();
+                Ok(id)
+            },
+        )
+        .unwrap();
+    globals.set("sin_shape", sin_shape).unwrap();
+    let circle_shape = lua
+        .create_function(
+            move |_, (radius, x, y, z, speed): (f32, f32, f32, f32, f32)| {
+                let ss = CircleShape {
+                    angle: 0.0,
+                    radius: radius,
+                    center: Vec3 { x: x, y: y, z: z },
+                    speed: (speed % 100.0) / 100.0,
+                };
+                let shape = Shape::circle(ss, start);
+                let id = shape.id;
+                let ss = ShapeCommand::Draw(shape);
+                sender3.send(ss).unwrap();
+                Ok(id)
+            },
+        )
+        .unwrap();
+    globals.set("circle_shape", circle_shape).unwrap();
+
+    let clear_shape = lua
+        .create_function(move |_, id: usize| {
+            sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("clear_shape", clear_shape).unwrap();
+
+    let f_shape = lua
+        .create_function(move |_, (fun, begin, end): (Function, f32, f32)| {
+            let shape = Shape::f(FShape::new(fun, begin, end), start);
             let id = shape.id;
-            let ss = ShapeCommand::Draw(shape);
-            sender2.send(ss).unwrap();
-            id
-        },
-    );
-    engine.register_fn(
-        "circle-shape",
-        move |radius: i64, x: i64, y: i64, z: i64, speed: i64| {
-            let ss = CircleShape {
-                angle: 0.0,
-                radius: radius as f32,
-                center: Vec3 {
-                    x: x as f32,
-                    y: y as f32,
-                    z: z as f32,
-                },
-                speed: (speed as f32 % 100.0) / 100.0,
-            };
-            let shape = Shape::circle(ss, start);
-            let id = shape.id;
-            let ss = ShapeCommand::Draw(shape);
-            sender3.send(ss).unwrap();
-            id
-        },
-    );
-    engine.register_fn("clear-shape", move |id: usize| {
-        sender4.send(ShapeCommand::ClearShapeWithId(id)).unwrap();
-    });
-    engine.register_fn("f-shape", move |fun: SteelVal, begin: f32, end: f32| {
-        let shape = Shape::f(FShape::new(fun, begin, end), start);
-        let id = shape.id;
-        sender5.send(ShapeCommand::Draw(shape)).unwrap();
-        id
-    });
-    engine.register_fn("clear-all-shapes", move || {
-        sender.send(ShapeCommand::ClearAll).unwrap();
-    });
-    engine
+            sender5.send(ShapeCommand::Draw(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("f_shape", f_shape).unwrap();
+
+    let clear_all_shapes = lua
+        .create_function(move |_, ()| {
+            sender.send(ShapeCommand::ClearAll).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("clear_all_shapes", clear_all_shapes).unwrap();
+
+    lua
 }
 
 fn program_path() -> PathBuf {
@@ -238,7 +247,7 @@ impl Default for CircleShape {
     }
 }
 
-fn draw_shapes(mut vm: ResMut<Vm>, mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
+fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
         match &mut shape.form {
             ShapeForm::Sin(ss) => {
@@ -263,11 +272,8 @@ fn draw_shapes(mut vm: ResMut<Vm>, mut gizmos: Gizmos, mut shapes: ResMut<Shapes
                 let fun = fshape.fun.clone();
                 let x = fshape.begin;
                 fshape.begin = fshape.begin.lerp(fshape.end, fshape.speed);
-                let y: Option<f32> =
-                    vm.0.call_function_with_args(fun, vec![SteelVal::from(x)])
-                        .ok()
-                        .and_then(|x| x.try_into().ok());
-                if let Some(y) = y {
+                let y = fun.call::<f32>(x);
+                if let Ok(y) = y {
                     fshape.verts.push(Vec3 { x, y, z: 0.0 });
                 }
                 gizmos.linestrip(fshape.verts.clone(), GREEN);
@@ -304,13 +310,13 @@ struct SinShape {
 #[derive(Debug)]
 struct FShape {
     verts: Vec<Vec3>,
-    fun: SteelVal,
+    fun: Function,
     speed: f32,
     begin: f32,
     end: f32,
 }
 impl FShape {
-    fn new(fun: SteelVal, begin: f32, end: f32) -> Self {
+    fn new(fun: Function, begin: f32, end: f32) -> Self {
         Self {
             fun,
             verts: Vec::new(),
