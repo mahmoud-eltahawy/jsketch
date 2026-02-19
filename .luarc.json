@@ -5,6 +5,8 @@
         "circle_shape",
         "transition",
         "draw",
-        "f_shape"
+        "f_shape",
+        "convert_shape",
+        "rectangle_shape"
     ]
 }

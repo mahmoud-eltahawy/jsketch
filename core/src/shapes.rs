@@ -139,6 +139,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let sender6 = sender.clone();
     let sender7 = sender.clone();
     let sender8 = sender.clone();
+    let sender9 = sender.clone();
 
     let sin_shape = lua
         .create_function(
@@ -218,6 +219,18 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         })
         .unwrap();
     globals.set("convert_shape", convert_shape).unwrap();
+
+    let rectangle_shape = lua
+        .create_function(move |_, (width, height): (f32, f32)| {
+            let rect = Rectangle::new(width, height);
+            let shape = Shape::new(rect, start);
+            let id = shape.id;
+            let ss = ShapeCommand::Register(shape);
+            sender9.send(ss).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("rectangle_shape", rectangle_shape).unwrap();
 
     let clear_all_shapes = lua
         .create_function(move |_, ()| {
@@ -499,6 +512,65 @@ impl Points for SinShape {
             let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
             let y = amp * (x * freq).sin();
             Vec3::new(x, y, 0.0)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Rectangle {
+    width: f32,
+    height: f32,
+}
+
+impl Rectangle {
+    fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
+}
+
+impl Points for Rectangle {
+    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+        let w = self.width;
+        let h = self.height;
+        let half_w = w / 2.0;
+        let half_h = h / 2.0;
+        let top_right = Vec3 {
+            x: half_w,
+            y: half_h,
+            z: 0.0,
+        };
+        let top_left = Vec3 {
+            x: -half_w,
+            y: half_h,
+            z: 0.0,
+        };
+        let bottom_right = Vec3 {
+            x: half_w,
+            y: -half_h,
+            z: 0.0,
+        };
+        let bottom_left = Vec3 {
+            x: -half_w,
+            y: -half_h,
+            z: 0.0,
+        };
+        const SIDE_RESOLUTION: usize = SHAPE_RESOLUTION / 4;
+
+        Box::new(move |i| {
+            let t = (i % SIDE_RESOLUTION) as f32 / SIDE_RESOLUTION as f32;
+            if (0..SIDE_RESOLUTION).contains(&i) {
+                //bottom side
+                bottom_left.lerp(bottom_right, t)
+            } else if (SIDE_RESOLUTION..SIDE_RESOLUTION * 2).contains(&i) {
+                //right side
+                bottom_right.lerp(top_right, t)
+            } else if (SIDE_RESOLUTION * 2..SIDE_RESOLUTION * 3).contains(&i) {
+                //top side
+                top_right.lerp(top_left, t)
+            } else {
+                //left side
+                top_left.lerp(bottom_left, t)
+            }
         })
     }
 }

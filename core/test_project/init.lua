@@ -26,9 +26,13 @@ local third =f_shape(function (x)
   return x * x * x
 end,-2.0,3.0)
 
+local rect = rectangle_shape(5, 3)
+transition(rect,2,2,3)
 
 draw(fst)
+
 sleep(3)
+
 local cv = convert_shape(fst,snd)
-sleep(3)
-convert_shape(cv,third)
+sleep(5)
+convert_shape(cv,rect)
