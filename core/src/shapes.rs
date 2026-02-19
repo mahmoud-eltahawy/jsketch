@@ -479,9 +479,9 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
 // ==================== Shape Definitions ====================
 
 trait Points {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3>;
+    fn point_at(&self, i: usize) -> Vec3;
     fn points(&self) -> Vec<Vec3> {
-        (0..SHAPE_RESOLUTION).map(self.point_closure()).collect()
+        (0..SHAPE_RESOLUTION).map(|i| self.point_at(i)).collect()
     }
 }
 
@@ -503,16 +503,14 @@ impl SinShape {
 }
 
 impl Points for SinShape {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+    fn point_at(&self, i: usize) -> Vec3 {
         let start = self.range.start;
         let end = self.range.end;
         let amp = self.amplitude;
         let freq = self.frequency;
-        Box::new(move |i| {
-            let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
-            let y = amp * (x * freq).sin();
-            Vec3::new(x, y, 0.0)
-        })
+        let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
+        let y = amp * (x * freq).sin();
+        Vec3::new(x, y, 0.0)
     }
 }
 
@@ -529,7 +527,7 @@ impl Rectangle {
 }
 
 impl Points for Rectangle {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+    fn point_at(&self, i: usize) -> Vec3 {
         let w = self.width;
         let h = self.height;
         let half_w = w / 2.0;
@@ -556,35 +554,31 @@ impl Points for Rectangle {
         };
         const SIDE_RESOLUTION: usize = SHAPE_RESOLUTION / 4;
 
-        Box::new(move |i| {
-            let t = (i % SIDE_RESOLUTION) as f32 / SIDE_RESOLUTION as f32;
-            if (0..SIDE_RESOLUTION).contains(&i) {
-                //bottom side
-                bottom_left.lerp(bottom_right, t)
-            } else if (SIDE_RESOLUTION..SIDE_RESOLUTION * 2).contains(&i) {
-                //right side
-                bottom_right.lerp(top_right, t)
-            } else if (SIDE_RESOLUTION * 2..SIDE_RESOLUTION * 3).contains(&i) {
-                //top side
-                top_right.lerp(top_left, t)
-            } else {
-                //left side
-                top_left.lerp(bottom_left, t)
-            }
-        })
+        let t = (i % SIDE_RESOLUTION) as f32 / SIDE_RESOLUTION as f32;
+        if (0..SIDE_RESOLUTION).contains(&i) {
+            //bottom side
+            bottom_left.lerp(bottom_right, t)
+        } else if (SIDE_RESOLUTION..SIDE_RESOLUTION * 2).contains(&i) {
+            //right side
+            bottom_right.lerp(top_right, t)
+        } else if (SIDE_RESOLUTION * 2..SIDE_RESOLUTION * 3).contains(&i) {
+            //top side
+            top_right.lerp(top_left, t)
+        } else {
+            //left side
+            top_left.lerp(bottom_left, t)
+        }
     }
 }
 
 impl Points for Circle {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+    fn point_at(&self, i: usize) -> Vec3 {
         let radius = self.radius;
         const END: f32 = 2.0 * std::f32::consts::PI;
-        Box::new(move |i| {
-            let angle = 0.0.lerp(END, i as f32 / 400.0);
-            let x = radius * angle.cos();
-            let y = radius * angle.sin();
-            Vec3::new(x, y, 0.0)
-        })
+        let angle = 0.0.lerp(END, i as f32 / 400.0);
+        let x = radius * angle.cos();
+        let y = radius * angle.sin();
+        Vec3::new(x, y, 0.0)
     }
 }
 
@@ -604,14 +598,12 @@ impl FShape {
 }
 
 impl Points for FShape {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+    fn point_at(&self, i: usize) -> Vec3 {
         let start = self.range.start;
         let end = self.range.end;
         let fun = self.fun.clone();
-        Box::new(move |i| {
-            let x = start.lerp(end, i as f32 / 400.0);
-            let y = fun.call::<f32>(x).unwrap();
-            Vec3::new(x, y, 0.0)
-        })
+        let x = start.lerp(end, i as f32 / 400.0);
+        let y = fun.call::<f32>(x).unwrap();
+        Vec3::new(x, y, 0.0)
     }
 }
