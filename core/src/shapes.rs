@@ -575,7 +575,7 @@ impl Points for Circle {
     fn point_at(&self, i: usize) -> Vec3 {
         let radius = self.radius;
         const END: f32 = 2.0 * std::f32::consts::PI;
-        let angle = 0.0.lerp(END, i as f32 / 400.0);
+        let angle = 0.0.lerp(END, i as f32 / SHAPE_RESOLUTION as f32);
         let x = radius * angle.cos();
         let y = radius * angle.sin();
         Vec3::new(x, y, 0.0)
@@ -602,7 +602,7 @@ impl Points for FShape {
         let start = self.range.start;
         let end = self.range.end;
         let fun = self.fun.clone();
-        let x = start.lerp(end, i as f32 / 400.0);
+        let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
         let y = fun.call::<f32>(x).unwrap();
         Vec3::new(x, y, 0.0)
     }
