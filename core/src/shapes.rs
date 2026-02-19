@@ -1,4 +1,4 @@
-use bevy::color::palettes::css::{GREEN, RED};
+use bevy::color::palettes::css::GREEN;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use mlua::{Function, Lua};
@@ -211,6 +211,7 @@ struct Shape {
     draw_after: Option<Duration>,
     draw_progress: usize,
     center: Vec3,
+    verts: Vec<Vec3>,
     form: ShapeForm,
 }
 
@@ -225,6 +226,7 @@ impl Shape {
             draw_after: None,
             draw_progress: 0,
             center: Vec3::ZERO,
+            verts: Vec::with_capacity(SHAPE_RESOLOUTION),
         }
     }
     fn sin(s: SinShape, start: Instant) -> Self {
@@ -268,60 +270,46 @@ const SHAPE_RESOLOUTION: usize = 400;
 
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
+        gizmos.linestrip(shape.verts.clone(), GREEN);
         let Some(df) = shape.draw_after else {
             continue;
         };
         if shape.instant.elapsed() < df {
             continue;
         };
-        match &mut shape.form {
+        if shape.draw_progress > SHAPE_RESOLOUTION {
+            continue;
+        }
+        let point = match &shape.form {
             ShapeForm::Sin(ss) => {
-                if shape.draw_progress < SHAPE_RESOLOUTION {
-                    let x = ss.range.start.lerp(
-                        ss.range.end,
-                        shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32,
-                    );
-                    let y = ss.amplitude * (x * ss.frequency).sin();
-                    ss.verts.push(Vec3 { x: x, y, z: 0.0 });
-                    shape.draw_progress += 1;
-                }
-                gizmos.linestrip(ss.verts.clone(), GREEN);
+                let x = ss.range.start.lerp(
+                    ss.range.end,
+                    shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32,
+                );
+                let y = ss.amplitude * (x * ss.frequency).sin();
+                shape.draw_progress += 1;
+                Vec3 { x: x, y, z: 0.0 }
             }
             ShapeForm::Circle(cs) => {
                 const END: f32 = 360.0;
-                let angle = if shape.draw_progress < SHAPE_RESOLOUTION {
-                    let res = 0.0.lerp(END, shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32);
-                    shape.draw_progress += 1;
-                    res
-                } else {
-                    END
-                };
-
-                gizmos
-                    .arc_3d(
-                        angle.to_radians(),
-                        cs.radius,
-                        Isometry3d::new(shape.center, Quat::from_rotation_x(90.)),
-                        RED,
-                    )
-                    .resolution(1000);
+                let angle = 0.0.lerp(END, shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32);
+                let x = cs.radius * angle.cos();
+                let y = cs.radius * angle.sin();
+                shape.draw_progress += 1;
+                Vec3 { x, y, z: 0.0 }
             }
             ShapeForm::FShape(fshape) => {
-                if shape.draw_progress < SHAPE_RESOLOUTION {
-                    let fun = fshape.fun.clone();
-                    let x = fshape.begin.lerp(
-                        fshape.end,
-                        shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32,
-                    );
-                    let y = fun.call::<f32>(x);
-                    if let Ok(y) = y {
-                        fshape.verts.push(Vec3 { x, y, z: 0.0 });
-                    }
-                    shape.draw_progress += 1;
-                }
-                gizmos.linestrip(fshape.verts.clone(), GREEN);
+                let fun = fshape.fun.clone();
+                let x = fshape.range.start.lerp(
+                    fshape.range.end,
+                    shape.draw_progress as f32 / SHAPE_RESOLOUTION as f32,
+                );
+                let y = fun.call::<f32>(x).unwrap();
+                shape.draw_progress += 1;
+                Vec3 { x, y, z: 0.0 }
             }
-        }
+        };
+        shape.verts.push(point + shape.center);
     }
 }
 
@@ -365,7 +353,6 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
 
 #[derive(Debug)]
 struct SinShape {
-    verts: Vec<Vec3>,
     amplitude: f32,
     frequency: f32,
     range: Range<f32>,
@@ -373,18 +360,14 @@ struct SinShape {
 
 #[derive(Debug)]
 struct FShape {
-    verts: Vec<Vec3>,
     fun: Function,
-    begin: f32,
-    end: f32,
+    range: Range<f32>,
 }
 impl FShape {
     fn new(fun: Function, begin: f32, end: f32) -> Self {
         Self {
             fun,
-            verts: Vec::new(),
-            begin,
-            end,
+            range: begin..end,
         }
     }
 }
@@ -392,7 +375,6 @@ impl FShape {
 impl SinShape {
     fn new(amplitude: f32, frequency: f32, range: Range<f32>) -> Self {
         Self {
-            verts: Vec::new(),
             amplitude,
             frequency,
             range,
@@ -404,7 +386,6 @@ impl Default for SinShape {
     fn default() -> Self {
         let start = -10.0;
         Self {
-            verts: Default::default(),
             amplitude: 3.,
             frequency: 3.,
             range: (start..10.0),
