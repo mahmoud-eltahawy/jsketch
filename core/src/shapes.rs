@@ -104,6 +104,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let sender5 = sender.clone();
     let sender6 = sender.clone();
     let sender7 = sender.clone();
+    let sender8 = sender.clone();
     let sin_shape = lua
         .create_function(
             move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
@@ -169,6 +170,15 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         })
         .unwrap();
     globals.set("transition", transiton).unwrap();
+    let convert_shape = lua
+        .create_function(move |_, (from, to): (u128, u128)| {
+            sender8
+                .send(ShapeCommand::ConvertShape { from, to })
+                .unwrap();
+            Ok(from)
+        })
+        .unwrap();
+    globals.set("convert_shape", convert_shape).unwrap();
 
     let clear_all_shapes = lua
         .create_function(move |_, ()| {
@@ -212,7 +222,25 @@ struct Shape {
     draw_after: Option<Duration>,
     draw_progress: usize,
     center: Vec3,
-    verts: Vec<Vec3>,
+    verts: ShapeVelocity,
+}
+
+#[derive(Debug)]
+enum ShapeVelocity {
+    Fixed(Vec<Vec3>),
+    Moving {
+        moving_verts: Vec<Vec3>,
+        target: Vec<Vec3>,
+    },
+}
+
+impl ShapeVelocity {
+    fn origin_verts(&self) -> &Vec<Vec3> {
+        match self {
+            ShapeVelocity::Fixed(vs) => vs,
+            ShapeVelocity::Moving { moving_verts, .. } => moving_verts,
+        }
+    }
 }
 
 impl Shape {
@@ -225,14 +253,21 @@ impl Shape {
         Self {
             id,
             instant,
-            verts: shape.points(),
+            verts: ShapeVelocity::Fixed(shape.points()),
             draw_after: None,
             draw_progress: 0,
             center: Vec3::ZERO,
         }
     }
     fn retransition(&mut self) {
-        for v in self.verts.iter_mut() {
+        let vs = match &mut self.verts {
+            ShapeVelocity::Fixed(vs) => vs,
+            ShapeVelocity::Moving {
+                moving_verts: shape,
+                ..
+            } => shape,
+        };
+        for v in vs.iter_mut() {
             *v = *v + self.center;
         }
     }
@@ -245,17 +280,40 @@ const SHAPE_RESOLOUTION: usize = 400;
 
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
-        gizmos.linestrip(shape.verts[0..shape.draw_progress].to_vec(), GREEN);
-        let Some(df) = shape.draw_after else {
-            continue;
+        let stablize = match &mut shape.verts {
+            ShapeVelocity::Fixed(vs) => {
+                let Some(df) = shape.draw_after else {
+                    continue;
+                };
+                if shape.instant.elapsed() < df {
+                    continue;
+                };
+                if shape.draw_progress >= SHAPE_RESOLOUTION {
+                    continue;
+                }
+                shape.draw_progress += 1;
+
+                gizmos.linestrip(vs[0..shape.draw_progress].to_vec(), GREEN);
+                None
+            }
+            ShapeVelocity::Moving {
+                moving_verts,
+                target,
+            } => {
+                for (from, to) in moving_verts.iter_mut().zip(target) {
+                    *from = from.lerp(*to, 0.05);
+                }
+                gizmos.linestrip(moving_verts.to_vec(), GREEN);
+                if shape.draw_progress >= SHAPE_RESOLOUTION {
+                    Some(moving_verts.clone())
+                } else {
+                    None
+                }
+            }
         };
-        if shape.instant.elapsed() < df {
-            continue;
-        };
-        if shape.draw_progress >= SHAPE_RESOLOUTION {
-            continue;
+        if let Some(verts) = stablize {
+            shape.verts = ShapeVelocity::Fixed(verts);
         }
-        shape.draw_progress += 1;
     }
 }
 
@@ -292,23 +350,21 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
                 shape.retransition();
             }
             ShapeCommand::ConvertShape { from, to } => {
-                let (from_i, to_i) = {
-                    let from_i = shapes.0.iter().position(|x| x.id == from);
-                    let Some(from_i) = from_i else {
-                        continue;
-                    };
-                    let to_i = shapes.0.iter().position(|x| x.id == to);
-                    let Some(to_i) = to_i else {
-                        continue;
-                    };
-                    (from_i, to_i)
+                let from = shapes.0.iter().position(|x| x.id == from);
+                let Some(from) = from else {
+                    continue;
                 };
-                let from = shapes.0.get(from_i).unwrap();
-                let to = shapes.0.get(to_i).unwrap();
-
-                for i in 0..SHAPE_RESOLOUTION {
-                    todo!()
-                }
+                let to = shapes.0.iter().position(|x| x.id == to);
+                let Some(to) = to else {
+                    continue;
+                };
+                let to = shapes.0[to].verts.origin_verts().clone();
+                let from = &mut shapes.0[from];
+                let new_shape_verts = ShapeVelocity::Moving {
+                    moving_verts: from.verts.origin_verts().clone(),
+                    target: to,
+                };
+                from.verts = new_shape_verts;
             }
         }
     }
