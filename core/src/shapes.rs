@@ -132,6 +132,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let lua = Lua::new();
     let globals = lua.globals();
 
+    // Clone sender for each registered function
     let sender2 = sender.clone();
     let sender3 = sender.clone();
     let sender4 = sender.clone();
@@ -140,7 +141,14 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let sender7 = sender.clone();
     let sender8 = sender.clone();
     let sender9 = sender.clone();
+    let sender10 = sender.clone();
+    let sender11 = sender.clone();
+    let sender12 = sender.clone();
+    let sender13 = sender.clone();
+    let sender14 = sender.clone();
+    let sender15 = sender.clone();
 
+    // Existing shapes
     let sin_shape = lua
         .create_function(
             move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
@@ -239,6 +247,80 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         })
         .unwrap();
     globals.set("clear_all_shapes", clear_all_shapes).unwrap();
+
+    // ========== New shapes ==========
+
+    // Triangle (equilateral, centered, radius = distance from center to vertex)
+    let triangle_shape = lua
+        .create_function(move |_, radius: f32| {
+            let tri = Triangle::new(radius);
+            let shape = Shape::new(tri, start);
+            let id = shape.id;
+            sender10.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("triangle_shape", triangle_shape).unwrap();
+
+    // Pentagon
+    let pentagon_shape = lua
+        .create_function(move |_, radius: f32| {
+            let pent = Pentagon::new(radius);
+            let shape = Shape::new(pent, start);
+            let id = shape.id;
+            sender11.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("pentagon_shape", pentagon_shape).unwrap();
+
+    // Hexagon
+    let hexagon_shape = lua
+        .create_function(move |_, radius: f32| {
+            let hex = Hexagon::new(radius);
+            let shape = Shape::new(hex, start);
+            let id = shape.id;
+            sender12.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("hexagon_shape", hexagon_shape).unwrap();
+
+    // Star (five-pointed star with outer and inner radius)
+    let star_shape = lua
+        .create_function(move |_, (outer_radius, inner_radius): (f32, f32)| {
+            let star = Star::new(outer_radius, inner_radius, 5); // 5-pointed star
+            let shape = Shape::new(star, start);
+            let id = shape.id;
+            sender13.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("star_shape", star_shape).unwrap();
+
+    // Spiral (Archimedean spiral: r = a * theta)
+    let spiral_shape = lua
+        .create_function(move |_, (a, max_theta): (f32, f32)| {
+            let spiral = Spiral::new(a, max_theta);
+            let shape = Shape::new(spiral, start);
+            let id = shape.id;
+            sender14.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("spiral_shape", spiral_shape).unwrap();
+
+    // Square (convenience, just calls rectangle with equal sides)
+    let square_shape = lua
+        .create_function(move |_, size: f32| {
+            let rect = Rectangle::new(size, size);
+            let shape = Shape::new(rect, start);
+            let id = shape.id;
+            sender15.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("square_shape", square_shape).unwrap();
 
     lua
 }
@@ -455,10 +537,9 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
                 if instant.elapsed() < df {
                     continue;
                 };
-                if *draw_progress >= SHAPE_RESOLUTION {
-                    continue;
+                if *draw_progress < SHAPE_RESOLUTION {
+                    *draw_progress += 1;
                 }
-                *draw_progress += 1;
                 gizmos.linestrip(vs[0..*draw_progress].to_vec(), GREEN);
             }
             ShapeVelocity::Moving {
@@ -584,6 +665,11 @@ impl Points for Circle {
 }
 
 #[derive(Debug)]
+struct Circle {
+    radius: f32,
+}
+
+#[derive(Debug)]
 struct FShape {
     fun: Function,
     range: Range<f32>,
@@ -604,6 +690,173 @@ impl Points for FShape {
         let end = self.range.end;
         let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
         let y = self.fun.call::<f32>(x).unwrap();
+        Vec3::new(x, y, 0.0)
+    }
+}
+
+// ========== New Shapes ==========
+
+// Helper to generate polygon vertices for a regular polygon
+fn regular_polygon_vertices(radius: f32, sides: usize, start_angle: f32) -> Vec<Vec3> {
+    (0..sides)
+        .map(|i| {
+            let angle = start_angle + (i as f32 * 2.0 * std::f32::consts::PI / sides as f32);
+            Vec3::new(radius * angle.cos(), radius * angle.sin(), 0.0)
+        })
+        .collect()
+}
+
+// Triangle (equilateral)
+#[derive(Debug)]
+struct Triangle {
+    radius: f32,
+}
+
+impl Triangle {
+    fn new(radius: f32) -> Self {
+        Self { radius }
+    }
+}
+
+impl Points for Triangle {
+    fn point_at(&self, i: usize) -> Vec3 {
+        let sides = 3;
+        let points_per_side = SHAPE_RESOLUTION / sides;
+        let vertices = regular_polygon_vertices(self.radius, sides, 0.0);
+
+        let side = i / points_per_side;
+        let t = (i % points_per_side) as f32 / points_per_side as f32;
+
+        let from = vertices[side % sides];
+        let to = vertices[(side + 1) % sides];
+        from.lerp(to, t)
+    }
+}
+
+// Pentagon
+#[derive(Debug)]
+struct Pentagon {
+    radius: f32,
+}
+
+impl Pentagon {
+    fn new(radius: f32) -> Self {
+        Self { radius }
+    }
+}
+
+impl Points for Pentagon {
+    fn point_at(&self, i: usize) -> Vec3 {
+        let sides = 5;
+        let points_per_side = SHAPE_RESOLUTION / sides;
+        let vertices = regular_polygon_vertices(self.radius, sides, 0.0);
+
+        let side = i / points_per_side;
+        let t = (i % points_per_side) as f32 / points_per_side as f32;
+
+        let from = vertices[side];
+        let to = vertices[(side + 1) % sides];
+        from.lerp(to, t)
+    }
+}
+
+// Hexagon
+#[derive(Debug)]
+struct Hexagon {
+    radius: f32,
+}
+
+impl Hexagon {
+    fn new(radius: f32) -> Self {
+        Self { radius }
+    }
+}
+
+impl Points for Hexagon {
+    fn point_at(&self, i: usize) -> Vec3 {
+        let sides = 6;
+        let points_per_side = SHAPE_RESOLUTION / sides;
+        let vertices = regular_polygon_vertices(self.radius, sides, 0.0);
+
+        let side = i / points_per_side;
+        let t = (i % points_per_side) as f32 / points_per_side as f32;
+
+        let from = vertices[side % sides];
+        let to = vertices[(side + 1) % sides];
+        from.lerp(to, t)
+    }
+}
+
+// Star (five-pointed, but general number of points)
+#[derive(Debug)]
+struct Star {
+    outer_radius: f32,
+    inner_radius: f32,
+    points: usize, // number of outer points
+}
+
+impl Star {
+    fn new(outer_radius: f32, inner_radius: f32, points: usize) -> Self {
+        Self {
+            outer_radius,
+            inner_radius,
+            points,
+        }
+    }
+}
+
+impl Points for Star {
+    fn point_at(&self, i: usize) -> Vec3 {
+        let total_vertices = 2 * self.points; // outer and inner alternating
+        let points_per_segment = SHAPE_RESOLUTION / total_vertices;
+        let segment = i / points_per_segment;
+        let t = (i % points_per_segment) as f32 / points_per_segment as f32;
+
+        // Build vertex list in order: outer0, inner0, outer1, inner1, ..., outer_{n-1}, inner_{n-1}
+        let mut vertices = Vec::with_capacity(total_vertices);
+        for j in 0..self.points {
+            let outer_angle = j as f32 * 2.0 * std::f32::consts::PI / self.points as f32;
+            let inner_angle = outer_angle + std::f32::consts::PI / self.points as f32;
+
+            let outer = Vec3::new(
+                self.outer_radius * outer_angle.cos(),
+                self.outer_radius * outer_angle.sin(),
+                0.0,
+            );
+            let inner = Vec3::new(
+                self.inner_radius * inner_angle.cos(),
+                self.inner_radius * inner_angle.sin(),
+                0.0,
+            );
+            vertices.push(outer);
+            vertices.push(inner);
+        }
+
+        let from = vertices[segment];
+        let to = vertices[(segment + 1) % total_vertices];
+        from.lerp(to, t)
+    }
+}
+
+// Spiral (Archimedean: r = a * theta)
+#[derive(Debug)]
+struct Spiral {
+    a: f32,
+    max_theta: f32,
+}
+
+impl Spiral {
+    fn new(a: f32, max_theta: f32) -> Self {
+        Self { a, max_theta }
+    }
+}
+
+impl Points for Spiral {
+    fn point_at(&self, i: usize) -> Vec3 {
+        let theta = (i as f32 / SHAPE_RESOLUTION as f32) * self.max_theta;
+        let r = self.a * theta;
+        let x = r * theta.cos();
+        let y = r * theta.sin();
         Vec3::new(x, y, 0.0)
     }
 }
