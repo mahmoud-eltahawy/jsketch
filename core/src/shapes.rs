@@ -371,13 +371,13 @@ impl Points for FShape {
 
 impl Points for Circle {
     fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
-        const END: f32 = 360.0;
         let radius = self.radius;
+        const END: f32 = 2.0 * std::f32::consts::PI;
         let f = move |draw_progress: usize| {
             let angle = 0.0.lerp(END, draw_progress as f32 / SHAPE_RESOLOUTION as f32);
             let x = radius * angle.cos();
             let y = radius * angle.sin();
-            Vec3 { x: x, y, z: 0.0 }
+            Vec3 { x, y, z: 0.0 }
         };
         Box::new(f)
     }
