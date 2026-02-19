@@ -4,11 +4,111 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use mlua::{Function, Lua};
 use notify::event::{CreateKind, DataChange, ModifyKind};
 use notify::{EventKind, Watcher};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
+
+// ==================== Components ====================
+
+#[derive(Component, Debug, Clone)]
+struct Shape {
+    id: u128,
+    instant: Instant,
+    draw_after: Option<Duration>,
+    draw_progress: usize,
+    center: Vec3,
+    verts: ShapeVelocity,
+}
+
+#[derive(Debug, Clone)]
+enum ShapeVelocity {
+    Fixed(Vec<Vec3>),
+    Moving {
+        moving_verts: Vec<Vec3>,
+        target: Vec<Vec3>,
+    },
+}
+
+impl ShapeVelocity {
+    fn origin_verts(&self) -> &Vec<Vec3> {
+        match self {
+            ShapeVelocity::Fixed(vs) => vs,
+            ShapeVelocity::Moving { moving_verts, .. } => moving_verts,
+        }
+    }
+}
+
+impl Shape {
+    fn new<P>(shape: P, start: Instant) -> Self
+    where
+        P: Points,
+    {
+        let instant = Instant::now();
+        let id = instant.duration_since(start).as_nanos();
+        Self {
+            id,
+            instant,
+            verts: ShapeVelocity::Fixed(shape.points()),
+            draw_after: None,
+            draw_progress: 0,
+            center: Vec3::ZERO,
+        }
+    }
+
+    fn retransition(&mut self) {
+        let vs = match &mut self.verts {
+            ShapeVelocity::Fixed(vs) => vs,
+            ShapeVelocity::Moving {
+                moving_verts: shape,
+                ..
+            } => shape,
+        };
+        for v in vs.iter_mut() {
+            *v = *v + self.center;
+        }
+    }
+}
+
+// ==================== Resources ====================
+
+#[derive(Resource)]
+struct ShapeCommandReceiver(Receiver<ShapeCommand>);
+
+#[derive(Resource, Default)]
+struct ShapeIdMap(HashMap<u128, Entity>);
+
+#[derive(Resource)]
+struct ProjectPath(PathBuf);
+
+#[derive(Resource)]
+struct Vm(Lua);
+
+// ==================== Events ====================
+
+#[derive(Event, Copy, Clone, Debug)]
+enum ShapeAction {
+    ClearAll,
+    DrawAfter { entity: Entity, millis: u64 },
+    Transition { entity: Entity, target: Vec3 },
+    ClearShape(Entity),
+    ConvertShape { from: Entity, to: Entity },
+}
+
+// ==================== Channel Commands ====================
+
+enum ShapeCommand {
+    ClearAll,
+    Register(Shape),
+    DrawAfter { id: u128, milis: u64 },
+    Transition { id: u128, target: Vec3 },
+    ClearShape(u128),
+    ConvertShape { from: u128, to: u128 },
+}
+
+// ==================== Plugin ====================
 
 pub struct ShapesPlugin;
 
@@ -19,25 +119,122 @@ impl Plugin for ShapesPlugin {
         let start = Instant::now();
         let engine = prepare_engine(tx.clone(), start);
         let path = program_path();
-        app.init_resource::<Shapes>()
-            .insert_resource(ShapeReciver(rx))
+
+        app.init_resource::<ShapeIdMap>()
+            .insert_resource(ShapeCommandReceiver(rx))
             .insert_resource(ProjectPath(path))
             .insert_resource(Vm(engine))
-            .add_systems(
-                Update,
-                (
-                    script_system.run_if(run_once),
-                    draw_shapes,
-                    execute_shape_command,
-                ),
-            );
+            .add_systems(Startup, script_system)
+            .add_systems(Update, (receive_shape_commands, draw_shapes))
+            .add_observer(handle_shape_actions);
     }
 }
 
-const ENTRY_SCRIPT_NAME: &str = "init.lua";
+// ==================== Lua Engine Setup ====================
 
-#[derive(Resource)]
-struct Vm(Lua);
+fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
+    let lua = Lua::new();
+    let globals = lua.globals();
+
+    let sender2 = sender.clone();
+    let sender3 = sender.clone();
+    let sender4 = sender.clone();
+    let sender5 = sender.clone();
+    let sender6 = sender.clone();
+    let sender7 = sender.clone();
+    let sender8 = sender.clone();
+
+    let sin_shape = lua
+        .create_function(
+            move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
+                let ss = SinShape::new(amplitude, frequency, range_begin..range_end);
+                let shape = Shape::new(ss, start);
+                let id = shape.id;
+                let ss = ShapeCommand::Register(shape);
+                sender2.send(ss).unwrap();
+                Ok(id)
+            },
+        )
+        .unwrap();
+    globals.set("sin_shape", sin_shape).unwrap();
+
+    let circle_shape = lua
+        .create_function(move |_, radius| {
+            let ss = Circle { radius };
+            let shape = Shape::new(ss, start);
+            let id = shape.id;
+            let ss = ShapeCommand::Register(shape);
+            sender3.send(ss).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("circle_shape", circle_shape).unwrap();
+
+    let clear_shape = lua
+        .create_function(move |_, id: u128| {
+            sender4.send(ShapeCommand::ClearShape(id)).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("clear_shape", clear_shape).unwrap();
+
+    let f_shape = lua
+        .create_function(move |_, (fun, begin, end): (Function, f32, f32)| {
+            let shape = Shape::new(FShape::new(fun, begin, end), start);
+            let id = shape.id;
+            sender5.send(ShapeCommand::Register(shape)).unwrap();
+            Ok(id)
+        })
+        .unwrap();
+    globals.set("f_shape", f_shape).unwrap();
+
+    let draw = lua
+        .create_function(move |_, id: u128| {
+            sender6
+                .send(ShapeCommand::DrawAfter { id, milis: 0 })
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("draw", draw).unwrap();
+
+    let transition = lua
+        .create_function(move |_, (id, x, y, z): (u128, f32, f32, f32)| {
+            sender7
+                .send(ShapeCommand::Transition {
+                    id,
+                    target: Vec3 { x, y, z },
+                })
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("transition", transition).unwrap();
+
+    let convert_shape = lua
+        .create_function(move |_, (from, to): (u128, u128)| {
+            sender8
+                .send(ShapeCommand::ConvertShape { from, to })
+                .unwrap();
+            Ok(from)
+        })
+        .unwrap();
+    globals.set("convert_shape", convert_shape).unwrap();
+
+    let clear_all_shapes = lua
+        .create_function(move |_, ()| {
+            sender.send(ShapeCommand::ClearAll).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("clear_all_shapes", clear_all_shapes).unwrap();
+
+    lua
+}
+
+// ==================== File Watching ====================
+
+const ENTRY_SCRIPT_NAME: &str = "init.lua";
 
 fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
     let path = program_path.0.clone();
@@ -91,106 +288,6 @@ fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
     });
 }
 
-#[derive(Resource)]
-struct ProjectPath(PathBuf);
-
-fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
-    let lua = Lua::new();
-    let globals = lua.globals();
-
-    let sender2 = sender.clone();
-    let sender3 = sender.clone();
-    let sender4 = sender.clone();
-    let sender5 = sender.clone();
-    let sender6 = sender.clone();
-    let sender7 = sender.clone();
-    let sender8 = sender.clone();
-    let sin_shape = lua
-        .create_function(
-            move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
-                let ss = SinShape::new(amplitude, frequency, range_begin..range_end);
-                let shape = Shape::new(ss, start);
-                let id = shape.id;
-                let ss = ShapeCommand::Register(shape);
-                sender2.send(ss).unwrap();
-                Ok(id)
-            },
-        )
-        .unwrap();
-    globals.set("sin_shape", sin_shape).unwrap();
-    let circle_shape = lua
-        .create_function(move |_, radius| {
-            let ss = Circle { radius: radius };
-            let shape = Shape::new(ss, start);
-            let id = shape.id;
-            let ss = ShapeCommand::Register(shape);
-            sender3.send(ss).unwrap();
-            Ok(id)
-        })
-        .unwrap();
-    globals.set("circle_shape", circle_shape).unwrap();
-
-    let clear_shape = lua
-        .create_function(move |_, id: u128| {
-            sender4.send(ShapeCommand::ClearShape(id)).unwrap();
-            Ok(())
-        })
-        .unwrap();
-    globals.set("clear_shape", clear_shape).unwrap();
-
-    let f_shape = lua
-        .create_function(move |_, (fun, begin, end): (Function, f32, f32)| {
-            let shape = Shape::new(FShape::new(fun, begin, end), start);
-            let id = shape.id;
-            sender5.send(ShapeCommand::Register(shape)).unwrap();
-            Ok(id)
-        })
-        .unwrap();
-    globals.set("f_shape", f_shape).unwrap();
-
-    let draw = lua
-        .create_function(move |_, id: u128| {
-            sender6
-                .send(ShapeCommand::DrawAfter { id, milis: 0 })
-                .unwrap();
-            Ok(())
-        })
-        .unwrap();
-    globals.set("draw", draw).unwrap();
-
-    let transiton = lua
-        .create_function(move |_, (id, x, y, z): (u128, f32, f32, f32)| {
-            sender7
-                .send(ShapeCommand::Transition {
-                    id,
-                    target: Vec3 { x, y, z },
-                })
-                .unwrap();
-            Ok(())
-        })
-        .unwrap();
-    globals.set("transition", transiton).unwrap();
-    let convert_shape = lua
-        .create_function(move |_, (from, to): (u128, u128)| {
-            sender8
-                .send(ShapeCommand::ConvertShape { from, to })
-                .unwrap();
-            Ok(from)
-        })
-        .unwrap();
-    globals.set("convert_shape", convert_shape).unwrap();
-
-    let clear_all_shapes = lua
-        .create_function(move |_, ()| {
-            sender.send(ShapeCommand::ClearAll).unwrap();
-            Ok(())
-        })
-        .unwrap();
-    globals.set("clear_all_shapes", clear_all_shapes).unwrap();
-
-    lua
-}
-
 fn program_path() -> PathBuf {
     let mut args = env::args();
     let project_path = args.next().expect("program must exist!!");
@@ -203,98 +300,207 @@ fn program_path() -> PathBuf {
     }
 }
 
-#[derive(Resource)]
-struct ShapeReciver(Receiver<ShapeCommand>);
+// ==================== Bevy Systems ====================
 
-enum ShapeCommand {
-    ClearAll,
-    Register(Shape),
-    DrawAfter { id: u128, milis: u64 },
-    Transition { id: u128, target: Vec3 },
-    ClearShape(u128),
-    ConvertShape { from: u128, to: u128 },
+fn receive_shape_commands(
+    receiver: Res<ShapeCommandReceiver>,
+    mut id_map: ResMut<ShapeIdMap>,
+    mut commands: Commands,
+    shapes: Query<Entity, With<Shape>>, // added to despawn synchronously
+) {
+    let mut count = 0;
+    for cmd in receiver.0.try_iter() {
+        count += 1;
+        match cmd {
+            ShapeCommand::Register(shape) => {
+                let entity = commands.spawn(shape.clone()).id();
+                id_map.0.insert(shape.id, entity);
+                info!(
+                    "[RECV] Registered shape id {} -> entity {:?}",
+                    shape.id, entity
+                );
+            }
+            ShapeCommand::ClearAll => {
+                // Despawn all existing shapes immediately
+                for entity in shapes.iter() {
+                    commands.entity(entity).despawn();
+                }
+                id_map.0.clear();
+                info!("[RECV] Cleared all shapes synchronously");
+            }
+            ShapeCommand::DrawAfter { id, milis } => {
+                if let Some(&entity) = id_map.0.get(&id) {
+                    info!(
+                        "[RECV] Triggering DrawAfter for id {} (entity {:?}) with millis {}",
+                        id, entity, milis
+                    );
+                    commands.trigger(ShapeAction::DrawAfter {
+                        entity,
+                        millis: milis,
+                    });
+                } else {
+                    warn!("[RECV] DrawAfter: shape id {} not found", id);
+                }
+            }
+            ShapeCommand::Transition { id, target } => {
+                if let Some(&entity) = id_map.0.get(&id) {
+                    info!(
+                        "[RECV] Triggering Transition for id {} (entity {:?}) with target {:?}",
+                        id, entity, target
+                    );
+                    commands.trigger(ShapeAction::Transition { entity, target });
+                } else {
+                    warn!("[RECV] Transition: shape id {} not found", id);
+                }
+            }
+            ShapeCommand::ClearShape(id) => {
+                if let Some(&entity) = id_map.0.get(&id) {
+                    info!(
+                        "[RECV] Triggering ClearShape for id {} (entity {:?})",
+                        id, entity
+                    );
+                    commands.trigger(ShapeAction::ClearShape(entity));
+                } else {
+                    warn!("[RECV] ClearShape: shape id {} not found", id);
+                }
+            }
+            ShapeCommand::ConvertShape { from, to } => {
+                let from_entity = id_map.0.get(&from).copied();
+                let to_entity = id_map.0.get(&to).copied();
+                if let (Some(from_entity), Some(to_entity)) = (from_entity, to_entity) {
+                    info!(
+                        "[RECV] Triggering ConvertShape from id {} (entity {:?}) to id {} (entity {:?})",
+                        from, from_entity, to, to_entity
+                    );
+                    commands.trigger(ShapeAction::ConvertShape {
+                        from: from_entity,
+                        to: to_entity,
+                    });
+                } else {
+                    warn!(
+                        "[RECV] ConvertShape: from id {} or to id {} not found",
+                        from, to
+                    );
+                }
+            }
+        }
+    }
+    if count > 0 {
+        info!("[RECV] Processed {} commands this frame", count);
+    }
 }
 
-#[derive(Debug)]
-struct Shape {
-    id: u128,
-    instant: Instant,
-    draw_after: Option<Duration>,
-    draw_progress: usize,
-    center: Vec3,
-    verts: ShapeVelocity,
-}
-
-#[derive(Debug)]
-enum ShapeVelocity {
-    Fixed(Vec<Vec3>),
-    Moving {
-        moving_verts: Vec<Vec3>,
-        target: Vec<Vec3>,
-    },
-}
-
-impl ShapeVelocity {
-    fn origin_verts(&self) -> &Vec<Vec3> {
-        match self {
-            ShapeVelocity::Fixed(vs) => vs,
-            ShapeVelocity::Moving { moving_verts, .. } => moving_verts,
+// Observer function using On<ShapeAction>
+fn handle_shape_actions(
+    trigger: On<ShapeAction>,
+    mut shapes: Query<(Entity, &mut Shape)>,
+    mut id_map: ResMut<ShapeIdMap>,
+    mut commands: Commands,
+) {
+    let action = *trigger.event();
+    info!("[OBSERVER] Handling ShapeAction: {:?}", action);
+    match action {
+        ShapeAction::ClearAll => {
+            let entities: Vec<Entity> = shapes.iter().map(|(e, _)| e).collect();
+            for entity in entities {
+                commands.entity(entity).despawn();
+                info!("[OBSERVER] Despawned entity {:?} due to ClearAll", entity);
+            }
+            id_map.0.clear();
+            info!("[OBSERVER] Cleared id_map");
+        }
+        ShapeAction::DrawAfter { entity, millis } => {
+            if let Ok((_, mut shape)) = shapes.get_mut(entity) {
+                shape.draw_after = Some(Duration::from_millis(millis));
+                info!(
+                    "[OBSERVER] Set draw_after for entity {:?} to {}ms",
+                    entity, millis
+                );
+            } else {
+                warn!(
+                    "[OBSERVER] DrawAfter: entity {:?} not found or not a Shape",
+                    entity
+                );
+            }
+        }
+        ShapeAction::Transition { entity, target } => {
+            if let Ok((_, mut shape)) = shapes.get_mut(entity) {
+                shape.center += target;
+                shape.retransition();
+                info!(
+                    "[OBSERVER] Applied transition to entity {:?} with target {:?}",
+                    entity, target
+                );
+            } else {
+                warn!(
+                    "[OBSERVER] Transition: entity {:?} not found or not a Shape",
+                    entity
+                );
+            }
+        }
+        ShapeAction::ClearShape(entity) => {
+            if shapes.get(entity).is_ok() {
+                commands.entity(entity).despawn();
+                id_map.0.retain(|_, &mut e| e != entity);
+                info!("[OBSERVER] Despawned entity {:?} due to ClearShape", entity);
+            } else {
+                warn!("[OBSERVER] ClearShape: entity {:?} not found", entity);
+            }
+        }
+        ShapeAction::ConvertShape { from, to } => {
+            let to_shape = if let Ok((_, shape)) = shapes.get(to) {
+                shape.verts.origin_verts().clone()
+            } else {
+                warn!(
+                    "[OBSERVER] ConvertShape: target entity {:?} not found or not a Shape",
+                    to
+                );
+                return;
+            };
+            if let Ok((_, mut from_shape)) = shapes.get_mut(from) {
+                from_shape.verts = ShapeVelocity::Moving {
+                    moving_verts: from_shape.verts.origin_verts().clone(),
+                    target: to_shape,
+                };
+                info!(
+                    "[OBSERVER] Converted shape from entity {:?} to target shape",
+                    from
+                );
+            } else {
+                warn!(
+                    "[OBSERVER] ConvertShape: source entity {:?} not found or not a Shape",
+                    from
+                );
+            }
         }
     }
 }
 
-impl Shape {
-    fn new<P>(shape: P, start: Instant) -> Self
-    where
-        P: Points,
-    {
-        let instant = Instant::now();
-        let id = instant.duration_since(start).as_nanos();
-        Self {
-            id,
+fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
+    const SHAPE_RESOLUTION: usize = 400;
+
+    for mut shape in &mut shapes {
+        let Shape {
+            verts,
+            draw_after,
             instant,
-            verts: ShapeVelocity::Fixed(shape.points()),
-            draw_after: None,
-            draw_progress: 0,
-            center: Vec3::ZERO,
-        }
-    }
-    fn retransition(&mut self) {
-        let vs = match &mut self.verts {
-            ShapeVelocity::Fixed(vs) => vs,
-            ShapeVelocity::Moving {
-                moving_verts: shape,
-                ..
-            } => shape,
-        };
-        for v in vs.iter_mut() {
-            *v = *v + self.center;
-        }
-    }
-}
+            draw_progress,
+            ..
+        } = &mut *shape;
 
-#[derive(Resource, Default)]
-struct Shapes(Vec<Shape>);
-
-const SHAPE_RESOLOUTION: usize = 400;
-
-fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
-    for shape in &mut shapes.0 {
-        let stablize = match &mut shape.verts {
+        match verts {
             ShapeVelocity::Fixed(vs) => {
-                let Some(df) = shape.draw_after else {
+                let Some(df) = *draw_after else {
                     continue;
                 };
-                if shape.instant.elapsed() < df {
+                if instant.elapsed() < df {
                     continue;
                 };
-                if shape.draw_progress >= SHAPE_RESOLOUTION {
+                if *draw_progress >= SHAPE_RESOLUTION {
                     continue;
                 }
-                shape.draw_progress += 1;
-
-                gizmos.linestrip(vs[0..shape.draw_progress].to_vec(), GREEN);
-                None
+                *draw_progress += 1;
+                gizmos.linestrip(vs[0..*draw_progress].to_vec(), GREEN);
             }
             ShapeVelocity::Moving {
                 moving_verts,
@@ -304,69 +510,20 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
                     *from = from.lerp(*to, 0.05);
                 }
                 gizmos.linestrip(moving_verts.to_vec(), GREEN);
-                if shape.draw_progress >= SHAPE_RESOLOUTION {
-                    Some(moving_verts.clone())
-                } else {
-                    None
+                if *draw_progress >= SHAPE_RESOLUTION {
+                    *verts = ShapeVelocity::Fixed(moving_verts.clone());
                 }
             }
-        };
-        if let Some(verts) = stablize {
-            shape.verts = ShapeVelocity::Fixed(verts);
         }
     }
 }
 
-fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>) {
-    for shape in reciver.0.try_iter() {
-        match shape {
-            ShapeCommand::ClearAll => {
-                shapes.0.clear();
-            }
-            ShapeCommand::Register(shape) => {
-                shapes.0.push(shape);
-            }
-            ShapeCommand::ClearShape(id) => {
-                shapes.0.retain(|x| x.id != id as u128);
-            }
-            ShapeCommand::DrawAfter { id, milis } => {
-                let i = shapes.0.iter().position(|x| x.id == id);
-                let Some(i) = i else {
-                    continue;
-                };
-                let shape = shapes.0.get_mut(i);
-                let Some(shape) = shape else {
-                    continue;
-                };
-                shape.draw_after = Some(Duration::from_millis(milis));
-            }
-            ShapeCommand::Transition { id, target } => {
-                let i = shapes.0.iter().position(|x| x.id == id);
-                let Some(i) = i else {
-                    continue;
-                };
-                let shape = shapes.0.get_mut(i).unwrap();
-                shape.center += target;
-                shape.retransition();
-            }
-            ShapeCommand::ConvertShape { from, to } => {
-                let from = shapes.0.iter().position(|x| x.id == from);
-                let Some(from) = from else {
-                    continue;
-                };
-                let to = shapes.0.iter().position(|x| x.id == to);
-                let Some(to) = to else {
-                    continue;
-                };
-                let to = shapes.0[to].verts.origin_verts().clone();
-                let from = &mut shapes.0[from];
-                let new_shape_verts = ShapeVelocity::Moving {
-                    moving_verts: from.verts.origin_verts().clone(),
-                    target: to,
-                };
-                from.verts = new_shape_verts;
-            }
-        }
+// ==================== Shape Definitions ====================
+
+trait Points {
+    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3>;
+    fn points(&self) -> Vec<Vec3> {
+        (0..400).map(self.point_closure()).collect()
     }
 }
 
@@ -375,73 +532,6 @@ struct SinShape {
     amplitude: f32,
     frequency: f32,
     range: Range<f32>,
-}
-
-trait Points {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3>;
-    fn points(&self) -> Vec<Vec3> {
-        (0..SHAPE_RESOLOUTION)
-            .into_iter()
-            .map(self.point_closure())
-            .collect::<Vec<_>>()
-    }
-}
-
-impl Points for SinShape {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
-        let start = self.range.start;
-        let end = self.range.end;
-        let amp = self.amplitude;
-        let freq = self.frequency;
-        let f = move |draw_progress: usize| {
-            let x = start.lerp(end, draw_progress as f32 / SHAPE_RESOLOUTION as f32);
-            let y = amp * (x * freq).sin();
-            Vec3 { x: x, y, z: 0.0 }
-        };
-        Box::new(f)
-    }
-}
-
-impl Points for FShape {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
-        let start = self.range.start;
-        let end = self.range.end;
-        let fun = self.fun.clone();
-        let f = move |draw_progress: usize| {
-            let x = start.lerp(end, draw_progress as f32 / SHAPE_RESOLOUTION as f32);
-            let y = fun.call::<f32>(x).unwrap();
-            Vec3 { x: x, y, z: 0.0 }
-        };
-        Box::new(f)
-    }
-}
-
-impl Points for Circle {
-    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
-        let radius = self.radius;
-        const END: f32 = 2.0 * std::f32::consts::PI;
-        let f = move |draw_progress: usize| {
-            let angle = 0.0.lerp(END, draw_progress as f32 / SHAPE_RESOLOUTION as f32);
-            let x = radius * angle.cos();
-            let y = radius * angle.sin();
-            Vec3 { x, y, z: 0.0 }
-        };
-        Box::new(f)
-    }
-}
-
-#[derive(Debug)]
-struct FShape {
-    fun: Function,
-    range: Range<f32>,
-}
-impl FShape {
-    fn new(fun: Function, begin: f32, end: f32) -> Self {
-        Self {
-            fun,
-            range: begin..end,
-        }
-    }
 }
 
 impl SinShape {
@@ -454,13 +544,62 @@ impl SinShape {
     }
 }
 
-impl Default for SinShape {
-    fn default() -> Self {
-        let start = -10.0;
+impl Points for SinShape {
+    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+        let start = self.range.start;
+        let end = self.range.end;
+        let amp = self.amplitude;
+        let freq = self.frequency;
+        Box::new(move |i| {
+            let x = start.lerp(end, i as f32 / 400.0);
+            let y = amp * (x * freq).sin();
+            Vec3::new(x, y, 0.0)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Circle {
+    radius: f32,
+}
+
+impl Points for Circle {
+    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+        let radius = self.radius;
+        const END: f32 = 2.0 * std::f32::consts::PI;
+        Box::new(move |i| {
+            let angle = 0.0.lerp(END, i as f32 / 400.0);
+            let x = radius * angle.cos();
+            let y = radius * angle.sin();
+            Vec3::new(x, y, 0.0)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct FShape {
+    fun: Function,
+    range: Range<f32>,
+}
+
+impl FShape {
+    fn new(fun: Function, begin: f32, end: f32) -> Self {
         Self {
-            amplitude: 3.,
-            frequency: 3.,
-            range: (start..10.0),
+            fun,
+            range: begin..end,
         }
+    }
+}
+
+impl Points for FShape {
+    fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3> {
+        let start = self.range.start;
+        let end = self.range.end;
+        let fun = self.fun.clone();
+        Box::new(move |i| {
+            let x = start.lerp(end, i as f32 / 400.0);
+            let y = fun.call::<f32>(x).unwrap();
+            Vec3::new(x, y, 0.0)
+        })
     }
 }
