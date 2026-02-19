@@ -61,10 +61,7 @@ impl Shape {
     fn retransition(&mut self) {
         let vs = match &mut self.verts {
             ShapeVelocity::Fixed(vs) => vs,
-            ShapeVelocity::Moving {
-                moving_verts: shape,
-                ..
-            } => shape,
+            ShapeVelocity::Moving { moving_verts, .. } => moving_verts,
         };
         for v in vs.iter_mut() {
             *v = *v + self.center;
@@ -86,28 +83,27 @@ struct ProjectPath(PathBuf);
 #[derive(Resource)]
 struct Vm(Lua);
 
-// ==================== Events ====================
-
-#[derive(Event, Copy, Clone, Debug)]
-enum ShapeAction {
+// Generic operation, parameterized by the ID type.
+#[derive(Debug, Clone)]
+enum ShapeOp<T> {
+    DrawAfter { id: T, millis: u64 },
+    Transition { id: T, target: Vec3 },
+    ClearShape(T),
+    ConvertShape { from: T, to: T },
     ClearAll,
-    DrawAfter { entity: Entity, millis: u64 },
-    Transition { entity: Entity, target: Vec3 },
-    ClearShape(Entity),
-    ConvertShape { from: Entity, to: Entity },
 }
 
-// ==================== Channel Commands ====================
-
+// Channel command: uses u128 IDs, plus a separate Register variant.
 enum ShapeCommand {
-    ClearAll,
     Register(Shape),
-    DrawAfter { id: u128, milis: u64 },
-    Transition { id: u128, target: Vec3 },
-    ClearShape(u128),
-    ConvertShape { from: u128, to: u128 },
+    Op(ShapeOp<u128>), // all other operations go here
 }
 
+// Bevy event: uses Entity.
+#[derive(Event, Clone, Debug)]
+enum ShapeAction {
+    Op(ShapeOp<Entity>), // wrap the generic op
+}
 // ==================== Plugin ====================
 
 pub struct ShapesPlugin;
@@ -172,7 +168,9 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
 
     let clear_shape = lua
         .create_function(move |_, id: u128| {
-            sender4.send(ShapeCommand::ClearShape(id)).unwrap();
+            sender4
+                .send(ShapeCommand::Op(ShapeOp::ClearShape(id)))
+                .unwrap();
             Ok(())
         })
         .unwrap();
@@ -191,7 +189,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let draw = lua
         .create_function(move |_, id: u128| {
             sender6
-                .send(ShapeCommand::DrawAfter { id, milis: 0 })
+                .send(ShapeCommand::Op(ShapeOp::DrawAfter { id, millis: 0 }))
                 .unwrap();
             Ok(())
         })
@@ -201,10 +199,10 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let transition = lua
         .create_function(move |_, (id, x, y, z): (u128, f32, f32, f32)| {
             sender7
-                .send(ShapeCommand::Transition {
+                .send(ShapeCommand::Op(ShapeOp::Transition {
                     id,
                     target: Vec3 { x, y, z },
-                })
+                }))
                 .unwrap();
             Ok(())
         })
@@ -214,7 +212,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let convert_shape = lua
         .create_function(move |_, (from, to): (u128, u128)| {
             sender8
-                .send(ShapeCommand::ConvertShape { from, to })
+                .send(ShapeCommand::Op(ShapeOp::ConvertShape { from, to }))
                 .unwrap();
             Ok(from)
         })
@@ -223,7 +221,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
 
     let clear_all_shapes = lua
         .create_function(move |_, ()| {
-            sender.send(ShapeCommand::ClearAll).unwrap();
+            sender.send(ShapeCommand::Op(ShapeOp::ClearAll)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -311,6 +309,7 @@ fn receive_shape_commands(
     let mut count = 0;
     for cmd in receiver.0.try_iter() {
         count += 1;
+
         match cmd {
             ShapeCommand::Register(shape) => {
                 let entity = commands.spawn(shape.clone()).id();
@@ -320,69 +319,46 @@ fn receive_shape_commands(
                     shape.id, entity
                 );
             }
-            ShapeCommand::ClearAll => {
-                // Despawn all existing shapes immediately
-                for entity in shapes.iter() {
-                    commands.entity(entity).despawn();
+            ShapeCommand::Op(op) => match op {
+                ShapeOp::ClearAll => {
+                    // Despawn all shapes immediately
+                    for entity in shapes.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    id_map.0.clear();
+                    info!("[RECV] Cleared all shapes synchronously");
                 }
-                id_map.0.clear();
-                info!("[RECV] Cleared all shapes synchronously");
-            }
-            ShapeCommand::DrawAfter { id, milis } => {
-                if let Some(&entity) = id_map.0.get(&id) {
-                    info!(
-                        "[RECV] Triggering DrawAfter for id {} (entity {:?}) with millis {}",
-                        id, entity, milis
-                    );
-                    commands.trigger(ShapeAction::DrawAfter {
-                        entity,
-                        millis: milis,
-                    });
-                } else {
-                    warn!("[RECV] DrawAfter: shape id {} not found", id);
+                ShapeOp::DrawAfter { id, millis } => {
+                    if let Some(&entity) = id_map.0.get(&id) {
+                        commands
+                            .trigger(ShapeAction::Op(ShapeOp::DrawAfter { id: entity, millis }));
+                    } else {
+                        warn!("... not found");
+                    }
                 }
-            }
-            ShapeCommand::Transition { id, target } => {
-                if let Some(&entity) = id_map.0.get(&id) {
-                    info!(
-                        "[RECV] Triggering Transition for id {} (entity {:?}) with target {:?}",
-                        id, entity, target
-                    );
-                    commands.trigger(ShapeAction::Transition { entity, target });
-                } else {
-                    warn!("[RECV] Transition: shape id {} not found", id);
+                ShapeOp::Transition { id, target } => {
+                    if let Some(&entity) = id_map.0.get(&id) {
+                        commands
+                            .trigger(ShapeAction::Op(ShapeOp::Transition { id: entity, target }));
+                    } else {
+                        warn!("... not found");
+                    }
                 }
-            }
-            ShapeCommand::ClearShape(id) => {
-                if let Some(&entity) = id_map.0.get(&id) {
-                    info!(
-                        "[RECV] Triggering ClearShape for id {} (entity {:?})",
-                        id, entity
-                    );
-                    commands.trigger(ShapeAction::ClearShape(entity));
-                } else {
-                    warn!("[RECV] ClearShape: shape id {} not found", id);
+                ShapeOp::ClearShape(id) => {
+                    if let Some(&entity) = id_map.0.get(&id) {
+                        commands.trigger(ShapeAction::Op(ShapeOp::ClearShape(entity)));
+                    } else {
+                        warn!("... not found");
+                    }
                 }
-            }
-            ShapeCommand::ConvertShape { from, to } => {
-                let from_entity = id_map.0.get(&from).copied();
-                let to_entity = id_map.0.get(&to).copied();
-                if let (Some(from_entity), Some(to_entity)) = (from_entity, to_entity) {
-                    info!(
-                        "[RECV] Triggering ConvertShape from id {} (entity {:?}) to id {} (entity {:?})",
-                        from, from_entity, to, to_entity
-                    );
-                    commands.trigger(ShapeAction::ConvertShape {
-                        from: from_entity,
-                        to: to_entity,
-                    });
-                } else {
-                    warn!(
-                        "[RECV] ConvertShape: from id {} or to id {} not found",
-                        from, to
-                    );
+                ShapeOp::ConvertShape { from, to } => {
+                    if let (Some(&f), Some(&t)) = (id_map.0.get(&from), id_map.0.get(&to)) {
+                        commands.trigger(ShapeAction::Op(ShapeOp::ConvertShape { from: f, to: t }));
+                    } else {
+                        warn!("... not found");
+                    }
                 }
-            }
+            },
         }
     }
     if count > 0 {
@@ -391,94 +367,63 @@ fn receive_shape_commands(
 }
 
 // Observer function using On<ShapeAction>
+
 fn handle_shape_actions(
     trigger: On<ShapeAction>,
     mut shapes: Query<(Entity, &mut Shape)>,
     mut id_map: ResMut<ShapeIdMap>,
     mut commands: Commands,
 ) {
-    let action = *trigger.event();
+    let action = trigger.event().clone();
     info!("[OBSERVER] Handling ShapeAction: {:?}", action);
     match action {
-        ShapeAction::ClearAll => {
-            let entities: Vec<Entity> = shapes.iter().map(|(e, _)| e).collect();
-            for entity in entities {
-                commands.entity(entity).despawn();
-                info!("[OBSERVER] Despawned entity {:?} due to ClearAll", entity);
+        ShapeAction::Op(op) => match op {
+            ShapeOp::ClearAll => unreachable!(), // handled in receiver
+            ShapeOp::DrawAfter { id: entity, millis } => {
+                if let Ok((_, mut shape)) = shapes.get_mut(entity) {
+                    shape.draw_after = Some(Duration::from_millis(millis));
+                } else {
+                    warn!("...");
+                }
             }
-            id_map.0.clear();
-            info!("[OBSERVER] Cleared id_map");
-        }
-        ShapeAction::DrawAfter { entity, millis } => {
-            if let Ok((_, mut shape)) = shapes.get_mut(entity) {
-                shape.draw_after = Some(Duration::from_millis(millis));
-                info!(
-                    "[OBSERVER] Set draw_after for entity {:?} to {}ms",
-                    entity, millis
-                );
-            } else {
-                warn!(
-                    "[OBSERVER] DrawAfter: entity {:?} not found or not a Shape",
-                    entity
-                );
+            ShapeOp::Transition { id: entity, target } => {
+                if let Ok((_, mut shape)) = shapes.get_mut(entity) {
+                    shape.center += target;
+                    shape.retransition();
+                } else {
+                    warn!("...");
+                }
             }
-        }
-        ShapeAction::Transition { entity, target } => {
-            if let Ok((_, mut shape)) = shapes.get_mut(entity) {
-                shape.center += target;
-                shape.retransition();
-                info!(
-                    "[OBSERVER] Applied transition to entity {:?} with target {:?}",
-                    entity, target
-                );
-            } else {
-                warn!(
-                    "[OBSERVER] Transition: entity {:?} not found or not a Shape",
-                    entity
-                );
+            ShapeOp::ClearShape(entity) => {
+                if shapes.get(entity).is_ok() {
+                    commands.entity(entity).despawn();
+                    id_map.0.retain(|_, &mut e| e != entity);
+                } else {
+                    warn!("...");
+                }
             }
-        }
-        ShapeAction::ClearShape(entity) => {
-            if shapes.get(entity).is_ok() {
-                commands.entity(entity).despawn();
-                id_map.0.retain(|_, &mut e| e != entity);
-                info!("[OBSERVER] Despawned entity {:?} due to ClearShape", entity);
-            } else {
-                warn!("[OBSERVER] ClearShape: entity {:?} not found", entity);
-            }
-        }
-        ShapeAction::ConvertShape { from, to } => {
-            let to_shape = if let Ok((_, shape)) = shapes.get(to) {
-                shape.verts.origin_verts().clone()
-            } else {
-                warn!(
-                    "[OBSERVER] ConvertShape: target entity {:?} not found or not a Shape",
-                    to
-                );
-                return;
-            };
-            if let Ok((_, mut from_shape)) = shapes.get_mut(from) {
-                from_shape.verts = ShapeVelocity::Moving {
-                    moving_verts: from_shape.verts.origin_verts().clone(),
-                    target: to_shape,
+            ShapeOp::ConvertShape { from, to } => {
+                let to_shape = if let Ok((_, shape)) = shapes.get(to) {
+                    shape.verts.origin_verts().clone()
+                } else {
+                    warn!("... target not found");
+                    return;
                 };
-                info!(
-                    "[OBSERVER] Converted shape from entity {:?} to target shape",
-                    from
-                );
-            } else {
-                warn!(
-                    "[OBSERVER] ConvertShape: source entity {:?} not found or not a Shape",
-                    from
-                );
+                if let Ok((_, mut from_shape)) = shapes.get_mut(from) {
+                    from_shape.verts = ShapeVelocity::Moving {
+                        moving_verts: from_shape.verts.origin_verts().clone(),
+                        target: to_shape,
+                    };
+                } else {
+                    warn!("... source not found");
+                }
             }
-        }
+        },
     }
 }
 
+const SHAPE_RESOLUTION: usize = 400;
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
-    const SHAPE_RESOLUTION: usize = 400;
-
     for mut shape in &mut shapes {
         let Shape {
             verts,
@@ -523,7 +468,7 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
 trait Points {
     fn point_closure(&self) -> Box<dyn Fn(usize) -> Vec3>;
     fn points(&self) -> Vec<Vec3> {
-        (0..400).map(self.point_closure()).collect()
+        (0..SHAPE_RESOLUTION).map(self.point_closure()).collect()
     }
 }
 
@@ -551,16 +496,11 @@ impl Points for SinShape {
         let amp = self.amplitude;
         let freq = self.frequency;
         Box::new(move |i| {
-            let x = start.lerp(end, i as f32 / 400.0);
+            let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
             let y = amp * (x * freq).sin();
             Vec3::new(x, y, 0.0)
         })
     }
-}
-
-#[derive(Debug)]
-struct Circle {
-    radius: f32,
 }
 
 impl Points for Circle {
