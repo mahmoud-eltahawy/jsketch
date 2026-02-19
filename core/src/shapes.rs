@@ -325,11 +325,12 @@ fn receive_shape_commands(
 
         match cmd {
             ShapeCommand::Register(shape) => {
-                let entity = commands.spawn(shape.clone()).id();
-                id_map.0.insert(shape.id, entity);
+                let shape_id = shape.id;
+                let entity = commands.spawn(shape).id();
+                id_map.0.insert(shape_id, entity);
                 info!(
                     "[RECV] Registered shape id {} -> entity {:?}",
-                    shape.id, entity
+                    shape_id, entity
                 );
             }
             ShapeCommand::Op(op) => match op {
@@ -601,9 +602,8 @@ impl Points for FShape {
     fn point_at(&self, i: usize) -> Vec3 {
         let start = self.range.start;
         let end = self.range.end;
-        let fun = self.fun.clone();
         let x = start.lerp(end, i as f32 / SHAPE_RESOLUTION as f32);
-        let y = fun.call::<f32>(x).unwrap();
+        let y = self.fun.call::<f32>(x).unwrap();
         Vec3::new(x, y, 0.0)
     }
 }
