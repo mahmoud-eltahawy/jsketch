@@ -7,7 +7,7 @@ use notify::{EventKind, Watcher};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
 pub struct ShapesPlugin;
@@ -21,7 +21,6 @@ impl Plugin for ShapesPlugin {
         let path = program_path();
         app.init_resource::<Shapes>()
             .insert_resource(ShapeReciver(rx))
-            .insert_resource(Start(start))
             .insert_resource(ProjectPath(path))
             .insert_resource(Vm(engine))
             .add_systems(
@@ -93,9 +92,6 @@ fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
 }
 
 #[derive(Resource)]
-struct Start(Instant);
-
-#[derive(Resource)]
 struct ProjectPath(PathBuf);
 
 fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
@@ -106,13 +102,14 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
     let sender3 = sender.clone();
     let sender4 = sender.clone();
     let sender5 = sender.clone();
+    let sender6 = sender.clone();
     let sin_shape = lua
         .create_function(
             move |_, (amplitude, frequency, range_begin, range_end): (f32, f32, f32, f32)| {
                 let ss = SinShape::new(amplitude, frequency, range_begin..range_end);
                 let shape = Shape::sin(ss, start);
                 let id = shape.id;
-                let ss = ShapeCommand::Draw(shape);
+                let ss = ShapeCommand::Register(shape);
                 sender2.send(ss).unwrap();
                 Ok(id)
             },
@@ -130,7 +127,7 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
                 };
                 let shape = Shape::circle(ss, start);
                 let id = shape.id;
-                let ss = ShapeCommand::Draw(shape);
+                let ss = ShapeCommand::Register(shape);
                 sender3.send(ss).unwrap();
                 Ok(id)
             },
@@ -150,11 +147,21 @@ fn prepare_engine(sender: Arc<Sender<ShapeCommand>>, start: Instant) -> Lua {
         .create_function(move |_, (fun, begin, end): (Function, f32, f32)| {
             let shape = Shape::f(FShape::new(fun, begin, end), start);
             let id = shape.id;
-            sender5.send(ShapeCommand::Draw(shape)).unwrap();
+            sender5.send(ShapeCommand::Register(shape)).unwrap();
             Ok(id)
         })
         .unwrap();
     globals.set("f_shape", f_shape).unwrap();
+
+    let draw = lua
+        .create_function(move |_, id: u128| {
+            sender6
+                .send(ShapeCommand::DrawAfter { id, milis: 0 })
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    globals.set("draw", draw).unwrap();
 
     let clear_all_shapes = lua
         .create_function(move |_, ()| {
@@ -184,7 +191,8 @@ struct ShapeReciver(Receiver<ShapeCommand>);
 
 enum ShapeCommand {
     ClearAll,
-    Draw(Shape),
+    Register(Shape),
+    DrawAfter { id: u128, milis: u64 },
     ClearShapeWithId(usize),
 }
 
@@ -192,6 +200,7 @@ enum ShapeCommand {
 struct Shape {
     id: u128,
     instant: Instant,
+    draw_after: Option<Duration>,
     form: ShapeForm,
 }
 
@@ -200,21 +209,36 @@ impl Shape {
         let form = ShapeForm::Sin(s);
         let instant = Instant::now();
         let id = instant.duration_since(start).as_nanos();
-        Self { id, instant, form }
+        Self {
+            id,
+            instant,
+            form,
+            draw_after: None,
+        }
     }
 
     fn circle(s: CircleShape, start: Instant) -> Self {
         let form = ShapeForm::Circle(s);
         let instant = Instant::now();
         let id = instant.duration_since(start).as_nanos();
-        Self { id, instant, form }
+        Self {
+            draw_after: None,
+            id,
+            instant,
+            form,
+        }
     }
 
     fn f(form: FShape, start: Instant) -> Shape {
         let form = ShapeForm::FShape(form);
         let instant = Instant::now();
         let id = instant.duration_since(start).as_nanos();
-        Self { id, instant, form }
+        Self {
+            draw_after: None,
+            id,
+            instant,
+            form,
+        }
     }
 }
 
@@ -249,6 +273,12 @@ impl Default for CircleShape {
 
 fn draw_shapes(mut gizmos: Gizmos, mut shapes: ResMut<Shapes>) {
     for shape in &mut shapes.0 {
+        let Some(df) = shape.draw_after else {
+            continue;
+        };
+        if shape.instant.elapsed() < df {
+            continue;
+        };
         match &mut shape.form {
             ShapeForm::Sin(ss) => {
                 ss.x = ss.x.lerp(ss.range.end, 0.01);
@@ -288,11 +318,22 @@ fn execute_shape_command(mut shapes: ResMut<Shapes>, reciver: Res<ShapeReciver>)
             ShapeCommand::ClearAll => {
                 shapes.0.clear();
             }
-            ShapeCommand::Draw(shape) => {
+            ShapeCommand::Register(shape) => {
                 shapes.0.push(shape);
             }
             ShapeCommand::ClearShapeWithId(id) => {
                 shapes.0.retain(|x| x.id != id as u128);
+            }
+            ShapeCommand::DrawAfter { id, milis } => {
+                let i = shapes.0.iter().position(|x| x.id == id);
+                let Some(i) = i else {
+                    continue;
+                };
+                let shape = shapes.0.get_mut(i);
+                let Some(shape) = shape else {
+                    continue;
+                };
+                shape.draw_after = Some(Duration::from_millis(milis));
             }
         }
     }
