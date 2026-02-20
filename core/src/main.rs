@@ -17,6 +17,7 @@ fn main() -> AppExit {
             CoordinatesPlugin,
             ShapesPlugin,
         ))
+        .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup_camera)
         .run()
 }
@@ -24,7 +25,7 @@ fn main() -> AppExit {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(1., 1., 8.).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(1., 3., 10.).looking_at(Vec3::ZERO, Vec3::Y),
         FreeCamera::default(),
     ));
 }

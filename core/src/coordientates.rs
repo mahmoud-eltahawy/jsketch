@@ -7,7 +7,7 @@ use bevy::{
 };
 
 #[derive(Resource)]
-pub struct DebugGridConfig {
+pub struct GridConfig {
     pub axes: AxesConfig,
     pub planes: PlanesConfig,
     pub scale: f32,
@@ -15,7 +15,7 @@ pub struct DebugGridConfig {
     pub min_axis_length: f32,
 }
 
-impl Default for DebugGridConfig {
+impl Default for GridConfig {
     fn default() -> Self {
         Self {
             axes: default(),
@@ -63,16 +63,12 @@ pub struct CoordinatesPlugin;
 
 impl Plugin for CoordinatesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DebugGridConfig>()
+        app.init_resource::<GridConfig>()
             .add_systems(Update, (draw_planes, draw_axis));
     }
 }
 
-fn draw_axis(
-    mut gizmo: Gizmos,
-    config: Res<DebugGridConfig>,
-    camera: Query<&Transform, With<Camera>>,
-) {
+fn draw_axis(mut gizmo: Gizmos, config: Res<GridConfig>, camera: Query<&Transform, With<Camera>>) {
     let Ok(transform) = camera.single() else {
         return;
     };
@@ -98,19 +94,19 @@ fn draw_axis(
 
 fn draw_planes(
     mut gizmo: Gizmos,
-    config: Res<DebugGridConfig>,
+    config: Res<GridConfig>,
     camera: Query<&Transform, With<Camera>>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
     };
 
-    let max_dist =
+    let length =
         (transform.translation.abs().max_element() * config.scale).max(config.min_axis_length);
 
-    let step = (max_dist / config.grid_lines_per_side as f32).max(0.5);
+    let step = (length / config.grid_lines_per_side as f32).max(0.5);
     // Number of steps on each side of zero
-    let steps_per_side = (max_dist / step).round() as i32;
+    let steps_per_side = (length / step).round() as i32;
 
     let planes = &config.planes;
 
@@ -119,37 +115,37 @@ fn draw_planes(
 
         if planes.xy {
             gizmo.line(
-                Vec3::new(-max_dist, pos, 0.0),
-                Vec3::new(max_dist, pos, 0.0),
+                Vec3::new(-length, pos, 0.0),
+                Vec3::new(length, pos, 0.0),
                 GRAY_300,
             );
             gizmo.line(
-                Vec3::new(pos, -max_dist, 0.0),
-                Vec3::new(pos, max_dist, 0.0),
+                Vec3::new(pos, -length, 0.0),
+                Vec3::new(pos, length, 0.0),
                 GRAY_300,
             );
         }
         if planes.xz {
             gizmo.line(
-                Vec3::new(-max_dist, 0.0, pos),
-                Vec3::new(max_dist, 0.0, pos),
+                Vec3::new(-length, 0.0, pos),
+                Vec3::new(length, 0.0, pos),
                 GRAY_300,
             );
             gizmo.line(
-                Vec3::new(pos, 0.0, -max_dist),
-                Vec3::new(pos, 0.0, max_dist),
+                Vec3::new(pos, 0.0, -length),
+                Vec3::new(pos, 0.0, length),
                 GRAY_300,
             );
         }
         if planes.yz {
             gizmo.line(
-                Vec3::new(0.0, -max_dist, pos),
-                Vec3::new(0.0, max_dist, pos),
+                Vec3::new(0.0, -length, pos),
+                Vec3::new(0.0, length, pos),
                 GRAY_300,
             );
             gizmo.line(
-                Vec3::new(0.0, pos, -max_dist),
-                Vec3::new(0.0, pos, max_dist),
+                Vec3::new(0.0, pos, -length),
+                Vec3::new(0.0, pos, length),
                 GRAY_300,
             );
         }
