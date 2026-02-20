@@ -502,37 +502,46 @@ fn handle_shape_actions(
                 }
             }
             ShapeOp::ConvertShape { from, to } => {
-                // Get target shape's vertices
-                let to_shape = match shapes.get(to) {
+                // 2. Get target shape's vertices
+                let target_verts = match shapes.get(to) {
                     Ok((_, shape)) => shape.verts.origin_verts().clone(),
                     Err(err) => {
                         warn!(
-                            "ConvertShape: target shape not found for entity {to:?}\nError : {err}",
+                            "ConvertShape: target shape not found for entity {:?}\nError: {}",
+                            to, err
                         );
                         return;
                     }
                 };
+                // 1. Validate source shape exists and is drawn
+                let (_, mut from_shape) = match shapes.get_mut(from) {
+                    Ok(data) => data,
+                    Err(_) => {
+                        warn!("ConvertShape: source shape not found for entity {:?}", from);
+                        return;
+                    }
+                };
 
-                // Despawn the target shape entity
+                if from_shape.draw_after.is_none() {
+                    error!("ConvertShape: trying to convert undrawn shape {:?}", from);
+                    return;
+                }
+
+                // 3. Despawn the target shape entity and remove it from the ID map
                 commands.entity(to).despawn();
-                // Remove it from the ID map
                 id_map.0.retain(|_, &mut e| e != to);
 
-                // Start morphing the source shape
-                if let Ok((_, mut from_shape)) = shapes.get_mut(from) {
-                    from_shape.verts = ShapeVelocity::Moving {
-                        moving_verts: from_shape.verts.origin_verts().clone(),
-                        target: to_shape,
-                    };
-                    if from_shape.draw_after.is_none() {
-                        error!("trying to convert undrawn shape",);
-                        return;
-                    };
-                    // Reset the draw progress so the morph animation runs from the beginning
-                    from_shape.draw_progress = 0;
-                } else {
-                    warn!("ConvertShape: source shape not found for entity {:?}", from);
-                }
+                // 4. Start morphing the source shape
+                //    origin_verts() returns the current positions (whether fixed or moving)
+                let current_verts = from_shape.verts.origin_verts().clone();
+
+                from_shape.verts = ShapeVelocity::Moving {
+                    moving_verts: current_verts,
+                    target: target_verts,
+                };
+
+                // Reset the draw progress so the morph animation runs from the beginning
+                from_shape.draw_progress = 0;
             }
         },
     }
