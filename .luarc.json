@@ -7,6 +7,12 @@
         "draw",
         "f_shape",
         "convert_shape",
-        "rectangle_shape"
+        "rectangle_shape",
+        "spiral_shape",
+        "triangle_shape",
+        "pentagon_shape",
+        "hexagon_shape",
+        "star_shape",
+        "square_shape"
     ]
 }
