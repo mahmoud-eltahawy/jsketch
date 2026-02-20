@@ -6,20 +6,34 @@ use bevy::{
     prelude::*,
 };
 
-/// Settings for drawing the coordinate axes.
-#[derive(Resource, Default)]
-pub struct AxisResource {
-    pub axis: Axis,
-    pub planes: Planes,
+#[derive(Resource)]
+pub struct DebugGridConfig {
+    pub axes: AxesConfig,
+    pub planes: PlanesConfig,
+    pub scale: f32,
+    pub grid_lines_per_side: i32,
+    pub min_axis_length: f32,
 }
 
-pub struct Axis {
+impl Default for DebugGridConfig {
+    fn default() -> Self {
+        Self {
+            axes: default(),
+            planes: default(),
+            scale: 10.0,
+            grid_lines_per_side: 20,
+            min_axis_length: 5.0,
+        }
+    }
+}
+
+pub struct AxesConfig {
     pub x: bool,
     pub y: bool,
     pub z: bool,
 }
 
-impl Default for Axis {
+impl Default for AxesConfig {
     fn default() -> Self {
         Self {
             x: true,
@@ -29,19 +43,18 @@ impl Default for Axis {
     }
 }
 
-/// Which grid planes to draw.
-pub struct Planes {
+pub struct PlanesConfig {
     pub xy: bool,
     pub xz: bool,
     pub yz: bool,
 }
 
-impl Default for Planes {
+impl Default for PlanesConfig {
     fn default() -> Self {
         Self {
             xz: true,
-            xy: false,
-            yz: false,
+            xy: Default::default(),
+            yz: Default::default(),
         }
     }
 }
@@ -50,87 +63,95 @@ pub struct CoordinatesPlugin;
 
 impl Plugin for CoordinatesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AxisResource>()
+        app.init_resource::<DebugGridConfig>()
             .add_systems(Update, (draw_planes, draw_axis));
     }
 }
 
-const SCALE: f32 = 10.;
-
 fn draw_axis(
     mut gizmo: Gizmos,
-    settings: Res<AxisResource>,
+    config: Res<DebugGridConfig>,
     camera: Query<&Transform, With<Camera>>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
     };
 
-    let max = transform.translation.abs().max_element() * SCALE;
+    let length =
+        (transform.translation.abs().max_element() * config.scale).max(config.min_axis_length);
 
-    let axis = &settings.axis;
-    if axis.x {
-        let x = Vec3::X * max;
+    let axes = &config.axes;
+
+    if axes.x {
+        let x = Vec3::X * length;
         gizmo.line(-x, x, RED);
     }
-    if axis.y {
-        let y = Vec3::Y * max;
+    if axes.y {
+        let y = Vec3::Y * length;
         gizmo.line(-y, y, GREEN);
     }
-    if axis.z {
-        let z = Vec3::Z * max;
+    if axes.z {
+        let z = Vec3::Z * length;
         gizmo.line(-z, z, BLUE);
     }
 }
 
 fn draw_planes(
     mut gizmo: Gizmos,
-    settings: Res<AxisResource>,
+    config: Res<DebugGridConfig>,
     camera: Query<&Transform, With<Camera>>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
     };
 
-    let max = transform.translation.abs().max_element() * SCALE;
+    let max_dist =
+        (transform.translation.abs().max_element() * config.scale).max(config.min_axis_length);
 
-    let planes = &settings.planes;
-    let range = -(max.floor() as i32)..=(max.floor() as i32);
+    let step = (max_dist / config.grid_lines_per_side as f32).max(0.5);
+    // Number of steps on each side of zero
+    let steps_per_side = (max_dist / step).round() as i32;
 
-    for i in range {
-        let i = i as f32;
+    let planes = &config.planes;
+
+    for i in -steps_per_side..=steps_per_side {
+        let pos = i as f32 * step;
 
         if planes.xy {
-            // Lines parallel to X at fixed Y
-            let start = Vec3::new(-max, i, 0.0);
-            let end = Vec3::new(max, i, 0.0);
-            gizmo.line(start, end, GRAY_300);
-            // Lines parallel to Y at fixed X
-            let start = Vec3::new(i, -max, 0.0);
-            let end = Vec3::new(i, max, 0.0);
-            gizmo.line(start, end, GRAY_300);
+            gizmo.line(
+                Vec3::new(-max_dist, pos, 0.0),
+                Vec3::new(max_dist, pos, 0.0),
+                GRAY_300,
+            );
+            gizmo.line(
+                Vec3::new(pos, -max_dist, 0.0),
+                Vec3::new(pos, max_dist, 0.0),
+                GRAY_300,
+            );
         }
-
         if planes.xz {
-            // Lines parallel to X at fixed Z
-            let start = Vec3::new(-max, 0.0, i);
-            let end = Vec3::new(max, 0.0, i);
-            gizmo.line(start, end, GRAY_300);
-            // Lines parallel to Z at fixed X
-            let start = Vec3::new(i, 0.0, -max);
-            let end = Vec3::new(i, 0.0, max);
-            gizmo.line(start, end, GRAY_300);
+            gizmo.line(
+                Vec3::new(-max_dist, 0.0, pos),
+                Vec3::new(max_dist, 0.0, pos),
+                GRAY_300,
+            );
+            gizmo.line(
+                Vec3::new(pos, 0.0, -max_dist),
+                Vec3::new(pos, 0.0, max_dist),
+                GRAY_300,
+            );
         }
-
         if planes.yz {
-            // Lines parallel to Y at fixed Z
-            let start = Vec3::new(0.0, -max, i);
-            let end = Vec3::new(0.0, max, i);
-            gizmo.line(start, end, GRAY_300);
-            // Lines parallel to Z at fixed Y
-            let start = Vec3::new(0.0, i, -max);
-            let end = Vec3::new(0.0, i, max);
-            gizmo.line(start, end, GRAY_300);
+            gizmo.line(
+                Vec3::new(0.0, -max_dist, pos),
+                Vec3::new(0.0, max_dist, pos),
+                GRAY_300,
+            );
+            gizmo.line(
+                Vec3::new(0.0, pos, -max_dist),
+                Vec3::new(0.0, pos, max_dist),
+                GRAY_300,
+            );
         }
     }
 }
