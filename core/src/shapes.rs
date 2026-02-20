@@ -371,7 +371,7 @@ fn script_system(vm: Res<Vm>, program_path: Res<ProjectPath>) {
                     path.clone()
                 };
                 let script = fs::read_to_string(&entry_script).unwrap();
-                println!("Executing: {}\n", entry_script.display());
+                info!("Executing: {}\n", entry_script.display());
                 if let Err(err) = engine.load(script).exec() {
                     dbg!(err);
                 };
@@ -387,7 +387,7 @@ fn program_path() -> PathBuf {
     match args.next().and_then(|x| x.parse::<PathBuf>().ok()) {
         Some(path) => path,
         None => {
-            eprintln!("Usage: {} <script.scm>", project_path);
+            error!("Usage: {} <script.scm>", project_path);
             std::process::exit(1);
         }
     }
@@ -426,6 +426,7 @@ fn receive_shape_commands(
                 }
                 ShapeOp::DrawAfter { id, millis } => {
                     if let Some(&entity) = id_map.0.get(&id) {
+                        info!("Triggering DrawAfter for entity {:?}", entity);
                         commands
                             .trigger(ShapeAction::Op(ShapeOp::DrawAfter { id: entity, millis }));
                     } else {
@@ -476,10 +477,12 @@ fn handle_shape_actions(
         ShapeAction::Op(op) => match op {
             ShapeOp::ClearAll => unreachable!(), // handled in receiver
             ShapeOp::DrawAfter { id: entity, millis } => {
+                info!("[OBSERVER] Received action: {:?}", trigger.event());
                 if let Ok((_, mut shape)) = shapes.get_mut(entity) {
                     shape.draw_after = Some(Duration::from_millis(millis));
+                    info!("[OBSERVER] shape drawn");
                 } else {
-                    warn!("...");
+                    warn!("[OBSERVER] Trying to draw shape that does not exist");
                 }
             }
             ShapeOp::Transition { id: entity, target } => {
@@ -499,19 +502,36 @@ fn handle_shape_actions(
                 }
             }
             ShapeOp::ConvertShape { from, to } => {
-                let to_shape = if let Ok((_, shape)) = shapes.get(to) {
-                    shape.verts.origin_verts().clone()
-                } else {
-                    warn!("... target not found");
-                    return;
+                // Get target shape's vertices
+                let to_shape = match shapes.get(to) {
+                    Ok((_, shape)) => shape.verts.origin_verts().clone(),
+                    Err(err) => {
+                        warn!(
+                            "ConvertShape: target shape not found for entity {to:?}\nError : {err}",
+                        );
+                        return;
+                    }
                 };
+
+                // Despawn the target shape entity
+                commands.entity(to).despawn();
+                // Remove it from the ID map
+                id_map.0.retain(|_, &mut e| e != to);
+
+                // Start morphing the source shape
                 if let Ok((_, mut from_shape)) = shapes.get_mut(from) {
                     from_shape.verts = ShapeVelocity::Moving {
                         moving_verts: from_shape.verts.origin_verts().clone(),
                         target: to_shape,
                     };
+                    if from_shape.draw_after.is_none() {
+                        error!("trying to convert undrawn shape",);
+                        return;
+                    };
+                    // Reset the draw progress so the morph animation runs from the beginning
+                    from_shape.draw_progress = 0;
                 } else {
-                    warn!("... source not found");
+                    warn!("ConvertShape: source shape not found for entity {:?}", from);
                 }
             }
         },
@@ -550,7 +570,9 @@ fn draw_shapes(mut gizmos: Gizmos, mut shapes: Query<&mut Shape>) {
                     *from = from.lerp(*to, 0.05);
                 }
                 gizmos.linestrip(moving_verts.to_vec(), GREEN);
-                if *draw_progress >= SHAPE_RESOLUTION {
+                if *draw_progress < SHAPE_RESOLUTION {
+                    *draw_progress += 1;
+                } else {
                     *verts = ShapeVelocity::Fixed(moving_verts.clone());
                 }
             }
