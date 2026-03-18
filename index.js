@@ -57,6 +57,14 @@ class Vec2 {
     return new Vec2({ x: this.x + other.x, y: this.y + other.y });
   }
 
+  // Linear interpolation to another Vec2
+  lerp(other, t) {
+    return new Vec2({
+      x: lerp(this.x, other.x, t),
+      y: lerp(this.y, other.y, t),
+    });
+  }
+
   // Rotate by angle (radians) around origin
   rotate(angle) {
     const cos = Math.cos(angle);
@@ -128,6 +136,62 @@ class Shape {
       const a = getTransformed(this.vertices[this.vertices.length - 1]);
       const b = getTransformed(this.vertices[0]);
       a.drawLineTo(b, this.pointSize, this.color);
+    }
+  }
+}
+
+// ----- MorphShape: interpolates between two shapes over time -----
+class MorphShape {
+  constructor(shape1, shape2, duration = ANIMATION_DURATION, color = generateRandomRgbColor()) {
+    // Capture a snapshot of both shapes (vertices and transforms)
+    this.shape1 = {
+      vertices: shape1.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
+      translation: new Vec2({ x: shape1.translation.x, y: shape1.translation.y }),
+      scale: new Vec2({ x: shape1.scale.x, y: shape1.scale.y }),
+      rotation: shape1.rotation,
+    };
+    this.shape2 = {
+      vertices: shape2.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
+      translation: new Vec2({ x: shape2.translation.x, y: shape2.translation.y }),
+      scale: new Vec2({ x: shape2.scale.x, y: shape2.scale.y }),
+      rotation: shape2.rotation,
+    };
+    this.duration = duration;
+    this.color = color;
+    this.pointSize = 2; // you could also average the two shapes' point sizes
+    this.closed = shape1.closed; // assume both have same closed state (or use shape1's)
+    this.animationStart = performance.now(); // start immediately
+  }
+
+  draw() {
+    const now = performance.now();
+    const elapsed = now - this.animationStart;
+    if (elapsed > this.duration) {
+      // Morph finished – you could optionally remove this shape, but we'll just draw the final state
+    }
+    const t = Math.min(elapsed / this.duration, 1);
+
+    // Interpolate transforms
+    const trans = this.shape1.translation.lerp(this.shape2.translation, t);
+    const scale = this.shape1.scale.lerp(this.shape2.scale, t);
+    const rot = lerp(this.shape1.rotation, this.shape2.rotation, t);
+
+    // Interpolate and transform all vertices
+    const count = this.shape1.vertices.length; // same as shape2
+    const transformed = [];
+    for (let i = 0; i < count; i++) {
+      const v = this.shape1.vertices[i].lerp(this.shape2.vertices[i], t);
+      const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
+      const rotated = scaled.rotate(rot);
+      transformed.push(rotated.add(trans));
+    }
+
+    // Draw lines between consecutive transformed vertices
+    for (let i = 0; i < count - 1; i++) {
+      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, this.color);
+    }
+    if (this.closed) {
+      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, this.color);
     }
   }
 }
@@ -293,27 +357,43 @@ function Scale(idx, sx, sy = sx) {
   shapes[idx].scale = new Vec2({ x: sx, y: sy });
 }
 
-// Set absolute rotation (in degrees)
+// Set absolute rotation (in radians)
 function Rotate(idx, angle) {
-  shapes[idx].rotation = angle * Math.PI/180;
+  shapes[idx].rotation = angle;
 }
 
-// ----- Animation control -----
+// ----- Morph: create a shape that interpolates between two shapes -----
+function Morph(idx1, idx2, duration = ANIMATION_DURATION) {
+  const shape1 = shapes[idx1];
+  const shape2 = shapes[idx2];
+  if (!shape1 || !shape2) {
+    throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
+  }
+  const morph = new MorphShape(shape1, shape2, duration);
+  shapes.push(morph);
+  return shapes.length - 1; // index of the morph shape
+}
+
+// ----- Animation control for regular shapes (segment reveal) -----
 function draw(index) {
   const shape = shapes[index];
   if (!shape) {
     throw new Error(`Shape with index ${index} does not exist.`);
   }
-  shape.animationStart = performance.now();
-  shape.progress = 0;
+  // Only regular shapes have progress animation; morph shapes use their own timing.
+  if (shape instanceof Shape) {
+    shape.animationStart = performance.now();
+    shape.progress = 0;
+  }
 }
 
 // ----- Animation loop -----
 function animate() {
   const now = performance.now();
 
+  // Update progress only for regular shapes (Shape instances)
   for (const shape of shapes) {
-    if (shape.animationStart !== null) {
+    if (shape instanceof Shape && shape.animationStart !== null) {
       const elapsed = now - shape.animationStart;
       const t = Math.min(elapsed, ANIMATION_DURATION);
       const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
@@ -329,7 +409,7 @@ function animate() {
   drawGrid();
 
   for (const shape of shapes) {
-    shape.draw();
+    shape.draw(); // MorphShape also has a draw method
   }
 
   requestAnimationFrame(animate);
