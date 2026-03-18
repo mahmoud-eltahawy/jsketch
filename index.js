@@ -77,32 +77,43 @@ class Vec2 {
   }
 }
 
-// ----- Shape class with translation support -----
+// ----- Shape class with translation and scale support -----
 class Shape {
-  constructor(vertices, color, pointSize = 2, closed = false, translation = { x: 0, y: 0 }) {
-    this.vertices = vertices;       // array of Vec2 (relative coordinates)
+  constructor(
+    vertices,
+    color,
+    pointSize = 2,
+    closed = false,
+    translation = { x: 0, y: 0 },
+    scale = { x: 1, y: 1 }
+  ) {
+    this.vertices = vertices;                 // array of Vec2 (relative coordinates)
     this.color = color;
     this.pointSize = pointSize;
     this.closed = closed;
-    this.translation = new Vec2(translation); // world offset applied when drawing
-    this.progress = 0;               // number of vertices to show
-    this.animationStart = null;      // timestamp when animation started
+    this.translation = new Vec2(translation); // world offset
+    this.scale = new Vec2(scale);             // scaling factors (applied before translation)
+    this.progress = 0;                         // number of vertices to show
+    this.animationStart = null;                // timestamp when animation started
   }
 
-  // Draw all segments up to current progress, applying translation
+  // Draw all segments up to current progress, applying scale then translation
   draw() {
-    // Helper to get translated vertex
-    const getTranslated = (v) => v.add(this.translation);
+    // Helper to transform a vertex: scale then translate
+    const getTransformed = (v) => {
+      const scaled = new Vec2({ x: v.x * this.scale.x, y: v.y * this.scale.y });
+      return scaled.add(this.translation);
+    };
 
     for (let i = 0; i < this.progress - 1; i++) {
-      const a = getTranslated(this.vertices[i]);
-      const b = getTranslated(this.vertices[i + 1]);
+      const a = getTransformed(this.vertices[i]);
+      const b = getTransformed(this.vertices[i + 1]);
       a.drawLineTo(b, this.pointSize, this.color);
     }
     // Closing segment
     if (this.closed && this.progress === this.vertices.length) {
-      const a = getTranslated(this.vertices[this.vertices.length - 1]);
-      const b = getTranslated(this.vertices[0]);
+      const a = getTransformed(this.vertices[this.vertices.length - 1]);
+      const b = getTransformed(this.vertices[0]);
       a.drawLineTo(b, this.pointSize, this.color);
     }
   }
@@ -202,7 +213,7 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories (all shapes created at origin by default) -----
+// ----- Shape factories (all shapes created at origin with default scale 1) -----
 function F(fun) {
   const vertices = [];
   for (let i = 0; i < NUM_VERTICES; i++) {
@@ -257,10 +268,16 @@ function Square(sideLength) {
   return shapes.length - 1;
 }
 
-// Shapes Actions
+// ----- Shape Actions -----
 
-function Translate(idx,x,y) {
-  shapes[idx].translation = new Vec2({x,y})
+// Set absolute translation
+function Translate(idx, x, y) {
+  shapes[idx].translation = new Vec2({ x, y });
+}
+
+// Set absolute scale (uniform or separate x,y)
+function Scale(idx, x, y = x) {
+  shapes[idx].scale = new Vec2({ x: x, y: y });
 }
 
 // ----- Animation control -----
@@ -271,6 +288,7 @@ function draw(index) {
   }
   shape.animationStart = performance.now();
   shape.progress = 0;
+  return index
 }
 
 // ----- Animation loop -----
