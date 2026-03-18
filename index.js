@@ -57,6 +57,16 @@ class Vec2 {
     return new Vec2({ x: this.x + other.x, y: this.y + other.y });
   }
 
+  // Rotate by angle (radians) around origin
+  rotate(angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return new Vec2({
+      x: this.x * cos - this.y * sin,
+      y: this.x * sin + this.y * cos,
+    });
+  }
+
   // Draw a square point at this vector
   draw(pointSize = 10, color = "#00FF00") {
     const { x, y } = this.normalized();
@@ -77,7 +87,7 @@ class Vec2 {
   }
 }
 
-// ----- Shape class with translation and scale support -----
+// ----- Shape class with translation, scale, and rotation support -----
 class Shape {
   constructor(
     vertices,
@@ -85,24 +95,27 @@ class Shape {
     pointSize = 2,
     closed = false,
     translation = { x: 0, y: 0 },
-    scale = { x: 1, y: 1 }
+    scale = { x: 1, y: 1 },
+    rotation = 0  // in radians
   ) {
     this.vertices = vertices;                 // array of Vec2 (relative coordinates)
     this.color = color;
     this.pointSize = pointSize;
     this.closed = closed;
     this.translation = new Vec2(translation); // world offset
-    this.scale = new Vec2(scale);             // scaling factors (applied before translation)
+    this.scale = new Vec2(scale);             // scaling factors
+    this.rotation = rotation;                 // rotation angle in radians
     this.progress = 0;                         // number of vertices to show
     this.animationStart = null;                // timestamp when animation started
   }
 
-  // Draw all segments up to current progress, applying scale then translation
+  // Draw all segments up to current progress, applying scale → rotate → translate
   draw() {
-    // Helper to transform a vertex: scale then translate
+    // Helper to transform a vertex
     const getTransformed = (v) => {
       const scaled = new Vec2({ x: v.x * this.scale.x, y: v.y * this.scale.y });
-      return scaled.add(this.translation);
+      const rotated = scaled.rotate(this.rotation);
+      return rotated.add(this.translation);
     };
 
     for (let i = 0; i < this.progress - 1; i++) {
@@ -213,7 +226,7 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories (all shapes created at origin with default scale 1) -----
+// ----- Shape factories (all shapes created at origin with default scale 1 and rotation 0) -----
 function F(fun) {
   const vertices = [];
   for (let i = 0; i < NUM_VERTICES; i++) {
@@ -276,8 +289,13 @@ function Translate(idx, x, y) {
 }
 
 // Set absolute scale (uniform or separate x,y)
-function Scale(idx, x, y = x) {
-  shapes[idx].scale = new Vec2({ x: x, y: y });
+function Scale(idx, sx, sy = sx) {
+  shapes[idx].scale = new Vec2({ x: sx, y: sy });
+}
+
+// Set absolute rotation (in degrees)
+function Rotate(idx, angle) {
+  shapes[idx].rotation = angle * Math.PI/180;
 }
 
 // ----- Animation control -----
@@ -288,7 +306,6 @@ function draw(index) {
   }
   shape.animationStart = performance.now();
   shape.progress = 0;
-  return index
 }
 
 // ----- Animation loop -----
