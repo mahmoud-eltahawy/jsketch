@@ -22,7 +22,7 @@ const canvas = document.getElementById("box");
 const ctx = canvas.getContext("2d");
 let gridLevel = 3; // 1 = axes only, 2 = integer grid, 3 = half‑step grid
 
-// ----- Linear interpolation (kept for possible future use) -----
+// ----- Linear interpolation -----
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
@@ -43,13 +43,18 @@ class Vec2 {
     };
   }
 
-  // Create a Vec2 from canvas pixel coordinates (useful for mouse interaction)
+  // Create a Vec2 from canvas pixel coordinates
   static fromCanvas({ x, y }) {
     const half = boxSize() / 2;
     return new Vec2({
       x: (x / half - 1) * CONFIG.scaleX,
       y: (1 - y / half) * CONFIG.scaleY,
     });
+  }
+
+  // Vector addition
+  add(other) {
+    return new Vec2({ x: this.x + other.x, y: this.y + other.y });
   }
 
   // Draw a square point at this vector
@@ -72,26 +77,33 @@ class Vec2 {
   }
 }
 
-// ----- Shape class representing a connected set of points (open or closed) -----
+// ----- Shape class with translation support -----
 class Shape {
-  constructor(vertices, color, pointSize = 2, closed = false) {
-    this.vertices = vertices;       // array of Vec2
+  constructor(vertices, color, pointSize = 2, closed = false, translation = { x: 0, y: 0 }) {
+    this.vertices = vertices;       // array of Vec2 (relative coordinates)
     this.color = color;
-    this.pointSize = pointSize;      // line width / point size (used for lines here)
+    this.pointSize = pointSize;
     this.closed = closed;
-    this.progress = 0;               // number of vertices to show (0 = none)
+    this.translation = new Vec2(translation); // world offset applied when drawing
+    this.progress = 0;               // number of vertices to show
     this.animationStart = null;      // timestamp when animation started
   }
 
-  // Draw all segments up to current progress
+  // Draw all segments up to current progress, applying translation
   draw() {
-    // Draw lines between consecutive vertices
+    // Helper to get translated vertex
+    const getTranslated = (v) => v.add(this.translation);
+
     for (let i = 0; i < this.progress - 1; i++) {
-      this.vertices[i].drawLineTo(this.vertices[i + 1], this.pointSize, this.color);
+      const a = getTranslated(this.vertices[i]);
+      const b = getTranslated(this.vertices[i + 1]);
+      a.drawLineTo(b, this.pointSize, this.color);
     }
-    // If the shape is closed and fully drawn, add the closing segment
+    // Closing segment
     if (this.closed && this.progress === this.vertices.length) {
-      this.vertices[this.vertices.length - 1].drawLineTo(this.vertices[0], this.pointSize, this.color);
+      const a = getTranslated(this.vertices[this.vertices.length - 1]);
+      const b = getTranslated(this.vertices[0]);
+      a.drawLineTo(b, this.pointSize, this.color);
     }
   }
 }
@@ -108,7 +120,6 @@ function resize() {
   const s = boxSize();
   canvas.width = s;
   canvas.height = s;
-  // Redraw happens automatically on next animation frame
 }
 window.addEventListener("resize", resize);
 
@@ -191,7 +202,7 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories with fixed vertex count -----
+// ----- Shape factories (all shapes created at origin by default) -----
 function F(fun) {
   const vertices = [];
   for (let i = 0; i < NUM_VERTICES; i++) {
@@ -202,13 +213,13 @@ function F(fun) {
   }
   const shape = new Shape(vertices, generateRandomRgbColor(), 2, false); // open curve
   shapes.push(shape);
-  return shapes.length - 1; // index
+  return shapes.length - 1;
 }
 
 function Circle(radius) {
   const vertices = [];
   for (let i = 0; i < NUM_VERTICES; i++) {
-    const angle = (i / NUM_VERTICES) * 2 * Math.PI; // 0 to 2π, exclusive of endpoint
+    const angle = (i / NUM_VERTICES) * 2 * Math.PI;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
     vertices.push(new Vec2({ x, y }));
@@ -224,22 +235,18 @@ function Square(sideLength) {
   const vertices = [];
   for (let i = 0; i < NUM_VERTICES; i++) {
     const t = i / NUM_VERTICES; // 0 to 1, exclusive of 1
-    const s = t * perimeter; // distance along perimeter
+    const s = t * perimeter;
     let x, y;
     if (s < sideLength) {
-      // top edge: left → right
       x = -half + s;
       y = -half;
     } else if (s < 2 * sideLength) {
-      // right edge: top → bottom
       x = half;
       y = -half + (s - sideLength);
     } else if (s < 3 * sideLength) {
-      // bottom edge: right → left
       x = half - (s - 2 * sideLength);
       y = half;
     } else {
-      // left edge: bottom → top
       x = -half;
       y = half - (s - 3 * sideLength);
     }
@@ -250,13 +257,18 @@ function Square(sideLength) {
   return shapes.length - 1;
 }
 
+// Shapes Actions
+
+function Translate(idx,x,y) {
+  shapes[idx].translation = new Vec2({x,y})
+}
+
 // ----- Animation control -----
 function draw(index) {
   const shape = shapes[index];
   if (!shape) {
     throw new Error(`Shape with index ${index} does not exist.`);
   }
-  // Start (or restart) the animation
   shape.animationStart = performance.now();
   shape.progress = 0;
 }
@@ -265,7 +277,6 @@ function draw(index) {
 function animate() {
   const now = performance.now();
 
-  // Update progress for all animating shapes
   for (const shape of shapes) {
     if (shape.animationStart !== null) {
       const elapsed = now - shape.animationStart;
@@ -274,12 +285,11 @@ function animate() {
       shape.progress = Math.min(targetProgress, shape.vertices.length);
 
       if (elapsed >= ANIMATION_DURATION) {
-        shape.animationStart = null; // stop updating this shape
+        shape.animationStart = null;
       }
     }
   }
 
-  // Redraw everything
   clearBackground();
   drawGrid();
 
@@ -290,7 +300,6 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
-// Start the animation loop
 requestAnimationFrame(animate);
 
 // ----- Initialisation -----
