@@ -6,7 +6,7 @@ function generateRandomRgbColor() {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// Configuration – use camelCase for variables, UPPER_CASE for true constants
+// Configuration
 const CONFIG = {
   scaleX: 10,
   scaleY: 10,
@@ -16,7 +16,7 @@ const FPS = 180;
 const TOTAL_FRAMES = 1000;
 const DDT = 1000 / FPS;                       // ms per frame
 const ANIMATION_DURATION = TOTAL_FRAMES * DDT; // ≈5556 ms
-const DDX = (2 * CONFIG.scaleX) / TOTAL_FRAMES; // x step per frame
+const NUM_VERTICES = 1000;                     // fixed vertex count for all shapes
 
 const canvas = document.getElementById("box");
 const ctx = canvas.getContext("2d");
@@ -191,16 +191,14 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories -----
+// ----- Shape factories with fixed vertex count -----
 function F(fun) {
-  let x = -CONFIG.scaleX;
   const vertices = [];
-  for (let i = 0; i < TOTAL_FRAMES; i++) {
+  for (let i = 0; i < NUM_VERTICES; i++) {
+    const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+    const x = -CONFIG.scaleX + t * (2 * CONFIG.scaleX);
     const y = fun(x);
-    if (!isNaN(y) && y >= -CONFIG.scaleY && y <= CONFIG.scaleY) {
-      vertices.push(new Vec2({ x, y }));
-    }
-    x += DDX;
+    vertices.push(new Vec2({ x, y }));
   }
   const shape = new Shape(vertices, generateRandomRgbColor(), 2, false); // open curve
   shapes.push(shape);
@@ -209,14 +207,44 @@ function F(fun) {
 
 function Circle(radius) {
   const vertices = [];
-  const steps = 2000; // enough for a smooth circle
-  for (let i = 0; i <= steps; i++) {
-    const angle = (i / steps) * 2 * Math.PI;
+  for (let i = 0; i < NUM_VERTICES; i++) {
+    const angle = (i / NUM_VERTICES) * 2 * Math.PI; // 0 to 2π, exclusive of endpoint
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
     vertices.push(new Vec2({ x, y }));
   }
-  // The last vertex equals the first, so the closing segment will be drawn when progress == vertices.length
+  const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); // closed loop
+  shapes.push(shape);
+  return shapes.length - 1;
+}
+
+function Square(sideLength) {
+  const half = sideLength / 2;
+  const perimeter = sideLength * 4;
+  const vertices = [];
+  for (let i = 0; i < NUM_VERTICES; i++) {
+    const t = i / NUM_VERTICES; // 0 to 1, exclusive of 1
+    const s = t * perimeter; // distance along perimeter
+    let x, y;
+    if (s < sideLength) {
+      // top edge: left → right
+      x = -half + s;
+      y = -half;
+    } else if (s < 2 * sideLength) {
+      // right edge: top → bottom
+      x = half;
+      y = -half + (s - sideLength);
+    } else if (s < 3 * sideLength) {
+      // bottom edge: right → left
+      x = half - (s - 2 * sideLength);
+      y = half;
+    } else {
+      // left edge: bottom → top
+      x = -half;
+      y = half - (s - 3 * sideLength);
+    }
+    vertices.push(new Vec2({ x, y }));
+  }
   const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); // closed loop
   shapes.push(shape);
   return shapes.length - 1;
