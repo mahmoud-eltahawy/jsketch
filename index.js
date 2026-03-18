@@ -1,3 +1,4 @@
+// utils.ts
 function generateRandomRgbColor() {
   const r = Math.floor(Math.random() * 256);
   const g = Math.floor(Math.random() * 256);
@@ -5,65 +6,61 @@ function generateRandomRgbColor() {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-const config = {
+// Configuration – use camelCase for variables, UPPER_CASE for true constants
+const CONFIG = {
   scaleX: 10,
   scaleY: 10,
 };
 
 const FPS = 180;
 const TOTAL_FRAMES = 1000;
-const DDT = 1000 / FPS;
-const ANIMATION_DURATION = TOTAL_FRAMES * DDT; 
-const DDX = (2 * config.scaleX) / TOTAL_FRAMES;
+const DDT = 1000 / FPS;                       // ms per frame
+const ANIMATION_DURATION = TOTAL_FRAMES * DDT; // ≈5556 ms
+const DDX = (2 * CONFIG.scaleX) / TOTAL_FRAMES; // x step per frame
 
-const draw_box = document.getElementById("box");
-const ctx = draw_box.getContext("2d");
-let draw_gradient_level = 3;
+const canvas = document.getElementById("box");
+const ctx = canvas.getContext("2d");
+let gridLevel = 3; // 1 = axes only, 2 = integer grid, 3 = half‑step grid
 
+// ----- Linear interpolation (kept for possible future use) -----
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+// ----- 2D vector with coordinate transformations -----
 class Vec2 {
   constructor({ x, y }) {
     this.x = x;
     this.y = y;
   }
 
+  // Convert world coordinates to canvas pixel coordinates
   normalized() {
-    const half = box_size() / 2;
+    const half = boxSize() / 2;
     return {
-      x: half * (1 + this.x / config.scaleX),
-      y: half * (1 - this.y / config.scaleY),
+      x: half * (1 + this.x / CONFIG.scaleX),
+      y: half * (1 - this.y / CONFIG.scaleY),
     };
   }
 
+  // Create a Vec2 from canvas pixel coordinates (useful for mouse interaction)
   static fromCanvas({ x, y }) {
-    const half = box_size() / 2;
+    const half = boxSize() / 2;
     return new Vec2({
-      x: (x / half - 1) * config.scaleX,
-      y: (1 - y / half) * config.scaleY,
+      x: (x / half - 1) * CONFIG.scaleX,
+      y: (1 - y / half) * CONFIG.scaleY,
     });
   }
 
-  distance_to(other) {
-    return Math.hypot(this.x - other.x, this.y - other.y);
-  }
-
-  lerp(other, t) {
-    return new Vec2({
-      x: lerp(this.x, other.x, t),
-      y: lerp(this.y, other.y, t),
-    });
-  }
-
-  draw(size = 10, color = "#00FF00") {
+  // Draw a square point at this vector
+  draw(pointSize = 10, color = "#00FF00") {
     const { x, y } = this.normalized();
     ctx.fillStyle = color;
-    ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    ctx.fillRect(x - pointSize / 2, y - pointSize / 2, pointSize, pointSize);
   }
 
-  draw_line_to(other, width = 2, color = "#FFFFFF") {
+  // Draw a line from this vector to another
+  drawLineTo(other, width = 2, color = "#FFFFFF") {
     const from = this.normalized();
     const to = other.normalized();
     ctx.strokeStyle = color;
@@ -75,155 +72,172 @@ class Vec2 {
   }
 }
 
+// ----- Shape class representing a connected set of points (open or closed) -----
 class Shape {
-  constructor(vertices, color, size = 2, closed = false) {
-    this.vertices = vertices;       
+  constructor(vertices, color, pointSize = 2, closed = false) {
+    this.vertices = vertices;       // array of Vec2
     this.color = color;
-    this.size = size;
-    this.closed = closed;           
-    this.progress = 0;              
-    this.animationStart = null;     
+    this.pointSize = pointSize;      // line width / point size (used for lines here)
+    this.closed = closed;
+    this.progress = 0;               // number of vertices to show (0 = none)
+    this.animationStart = null;      // timestamp when animation started
   }
 
+  // Draw all segments up to current progress
   draw() {
+    // Draw lines between consecutive vertices
     for (let i = 0; i < this.progress - 1; i++) {
-      this.vertices[i].draw_line_to(this.vertices[i + 1], this.size, this.color);
+      this.vertices[i].drawLineTo(this.vertices[i + 1], this.pointSize, this.color);
     }
+    // If the shape is closed and fully drawn, add the closing segment
     if (this.closed && this.progress === this.vertices.length) {
-      this.vertices[this.vertices.length - 1].draw_line_to(this.vertices[0], this.size, this.color);
+      this.vertices[this.vertices.length - 1].drawLineTo(this.vertices[0], this.pointSize, this.color);
     }
   }
 }
 
-const shapes = []; 
+// Global collection of shapes
+const shapes = [];
 
-function box_size() {
+// ----- Canvas sizing -----
+function boxSize() {
   return Math.min(window.innerHeight, window.innerWidth);
 }
 
 function resize() {
-  const s = box_size();
-  draw_box.width = s;
-  draw_box.height = s;
+  const s = boxSize();
+  canvas.width = s;
+  canvas.height = s;
+  // Redraw happens automatically on next animation frame
 }
 window.addEventListener("resize", resize);
 
-function draw_text(vec2, text, font_size = 14, color = "#00FFFF") {
+// ----- Text drawing helper (accepts Vec2) -----
+function drawText(vec2, text, fontSize = 14, color = "#00FFFF") {
   const { x, y } = vec2.normalized();
   ctx.fillStyle = color;
-  ctx.font = `${font_size}px sans-serif`;
+  ctx.font = `${fontSize}px sans-serif`;
   ctx.fillText(text, x, y);
 }
 
-function draw_line(begin, end, width = 2, color = "#FFFFFF") {
-  begin.draw_line_to(end, width, color);
+// ----- Simple line wrapper (for grid drawing) -----
+function drawLine(begin, end, width = 2, color = "#FFFFFF") {
+  begin.drawLineTo(end, width, color);
 }
 
-function clear_background() {
+// ----- Clear canvas to black -----
+function clearBackground() {
   ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, box_size(), box_size());
+  ctx.fillRect(0, 0, boxSize(), boxSize());
 }
 
-function draw_gradient() {
-  if (!draw_gradient_level) return;
-  if (![1, 2, 3].includes(draw_gradient_level)) {
-    throw new Error(
-      `draw_gradient_level should be 1, 2, 3 or falsy, but it is ${draw_gradient_level}`
+// ----- Draw grid based on gridLevel -----
+function drawGrid() {
+  if (!gridLevel) return;
+  if (![1, 2, 3].includes(gridLevel)) {
+    throw new Error(`gridLevel must be 1, 2, 3 or falsy (got ${gridLevel})`);
+  }
+
+  // Axes (level ≥ 1)
+  if (gridLevel >= 1) {
+    drawLine(
+      new Vec2({ x: -CONFIG.scaleX, y: 0 }),
+      new Vec2({ x: CONFIG.scaleX, y: 0 }),
+      3
+    );
+    drawLine(
+      new Vec2({ x: 0, y: -CONFIG.scaleY }),
+      new Vec2({ x: 0, y: CONFIG.scaleY }),
+      3
     );
   }
 
-  if (draw_gradient_level >= 1) {
-    draw_line(
-      new Vec2({ x: -config.scaleX, y: 0 }),
-      new Vec2({ x: config.scaleX, y: 0 }),
-      3
-    );
-    draw_line(
-      new Vec2({ x: 0, y: -config.scaleY }),
-      new Vec2({ x: 0, y: config.scaleY }),
-      3
-    );
-  }
-
-  for (let i = -config.scaleY; i <= config.scaleY; i++) {
-    draw_text(new Vec2({ x: 0, y: i }), i.toString());
-    if (draw_gradient_level >= 2) {
-      draw_line(
-        new Vec2({ x: -config.scaleX, y: i }),
-        new Vec2({ x: config.scaleX, y: i }),
+  // Horizontal lines and labels
+  for (let i = -CONFIG.scaleY; i <= CONFIG.scaleY; i++) {
+    drawText(new Vec2({ x: 0, y: i }), i.toString());
+    if (gridLevel >= 2) {
+      drawLine(
+        new Vec2({ x: -CONFIG.scaleX, y: i }),
+        new Vec2({ x: CONFIG.scaleX, y: i }),
         1
       );
     }
-    if (draw_gradient_level === 3) {
-      draw_line(
-        new Vec2({ x: -config.scaleX, y: i + 0.5 }),
-        new Vec2({ x: config.scaleX, y: i + 0.5 }),
+    if (gridLevel === 3) {
+      drawLine(
+        new Vec2({ x: -CONFIG.scaleX, y: i + 0.5 }),
+        new Vec2({ x: CONFIG.scaleX, y: i + 0.5 }),
         0.3
       );
     }
   }
 
-  for (let i = -config.scaleX; i <= config.scaleX; i++) {
-    draw_text(new Vec2({ x: i, y: 0 }), i.toString());
-    if (draw_gradient_level >= 2) {
-      draw_line(
-        new Vec2({ x: i, y: -config.scaleY }),
-        new Vec2({ x: i, y: config.scaleY }),
+  // Vertical lines and labels
+  for (let i = -CONFIG.scaleX; i <= CONFIG.scaleX; i++) {
+    drawText(new Vec2({ x: i, y: 0 }), i.toString());
+    if (gridLevel >= 2) {
+      drawLine(
+        new Vec2({ x: i, y: -CONFIG.scaleY }),
+        new Vec2({ x: i, y: CONFIG.scaleY }),
         1
       );
     }
-    if (draw_gradient_level === 3) {
-      draw_line(
-        new Vec2({ x: i + 0.5, y: -config.scaleY }),
-        new Vec2({ x: i + 0.5, y: config.scaleY }),
+    if (gridLevel === 3) {
+      drawLine(
+        new Vec2({ x: i + 0.5, y: -CONFIG.scaleY }),
+        new Vec2({ x: i + 0.5, y: CONFIG.scaleY }),
         0.3
       );
     }
   }
 }
 
+// ----- Shape factories -----
 function F(fun) {
-  let x = -config.scaleX;
+  let x = -CONFIG.scaleX;
   const vertices = [];
   for (let i = 0; i < TOTAL_FRAMES; i++) {
     const y = fun(x);
-    if (!isNaN(y) && y >= -config.scaleY && y <= config.scaleY) {
+    if (!isNaN(y) && y >= -CONFIG.scaleY && y <= CONFIG.scaleY) {
       vertices.push(new Vec2({ x, y }));
     }
     x += DDX;
   }
-  const shape = new Shape(vertices, generateRandomRgbColor(), 2, false); 
+  const shape = new Shape(vertices, generateRandomRgbColor(), 2, false); // open curve
   shapes.push(shape);
-  return shapes.length - 1; 
+  return shapes.length - 1; // index
 }
 
 function Circle(radius) {
-  let angle = 0;
-  const d_angle = Math.PI / 1000;
   const vertices = [];
-  while (angle <= 2 * Math.PI) {
+  const steps = 2000; // enough for a smooth circle
+  for (let i = 0; i <= steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
     const x = radius * Math.cos(angle);
     const y = radius * Math.sin(angle);
     vertices.push(new Vec2({ x, y }));
-    angle += d_angle;
   }
-  const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); 
+  // The last vertex equals the first, so the closing segment will be drawn when progress == vertices.length
+  const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); // closed loop
   shapes.push(shape);
-  return shapes.length - 1; 
+  return shapes.length - 1;
 }
 
+// ----- Animation control -----
 function draw(index) {
   const shape = shapes[index];
   if (!shape) {
     throw new Error(`Shape with index ${index} does not exist.`);
   }
+  // Start (or restart) the animation
   shape.animationStart = performance.now();
   shape.progress = 0;
 }
 
+// ----- Animation loop -----
 function animate() {
   const now = performance.now();
 
+  // Update progress for all animating shapes
   for (const shape of shapes) {
     if (shape.animationStart !== null) {
       const elapsed = now - shape.animationStart;
@@ -232,13 +246,14 @@ function animate() {
       shape.progress = Math.min(targetProgress, shape.vertices.length);
 
       if (elapsed >= ANIMATION_DURATION) {
-        shape.animationStart = null;
+        shape.animationStart = null; // stop updating this shape
       }
     }
   }
 
-  clear_background();
-  draw_gradient();
+  // Redraw everything
+  clearBackground();
+  drawGrid();
 
   for (const shape of shapes) {
     shape.draw();
@@ -247,10 +262,12 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
+// Start the animation loop
 requestAnimationFrame(animate);
 
+// ----- Initialisation -----
 function main() {
-  draw_gradient_level = 3;
+  gridLevel = 3;
   resize();
 }
 main();
