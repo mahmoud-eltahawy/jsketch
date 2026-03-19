@@ -202,7 +202,7 @@ class MorphShape {
     for (let i = 0; i < count - 1; i++) {
       transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
     }
-    if (shape1.closed) { // assume both have same closed state
+    if (shape2.closed) {
       transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
 
