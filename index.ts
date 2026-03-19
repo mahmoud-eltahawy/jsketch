@@ -1,4 +1,5 @@
 // index.ts – compiled to index.js by bun
+// A 2D animation framework with grid, shapes, and recording.
 
 // ----- Linear interpolation -----
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -7,18 +8,21 @@ class Color {
   r: number;
   g: number;
   b: number;
+  a: number = 1.0; // alpha 0-1
 
-  constructor(r: number, g: number, b: number) {
+  constructor(r: number, g: number, b: number, a: number = 1.0) {
     this.r = r;
     this.g = g;
     this.b = b;
+    this.a = a;
   }
 
   lerp(other: Color, t: number): Color {
     return new Color(
       lerp(this.r, other.r, t),
       lerp(this.g, other.g, t),
-      lerp(this.b, other.b, t)
+      lerp(this.b, other.b, t),
+      lerp(this.a, other.a, t)
     );
   }
 
@@ -31,7 +35,7 @@ class Color {
   }
 
   toString(): string {
-    return `rgb(${this.r}, ${this.g}, ${this.b})`;
+    return `rgba(${this.r}, ${this.g}, ${this.b}, ${this.a})`;
   }
 }
 
@@ -49,12 +53,24 @@ const NUM_VERTICES = 1000;                     // default vertex count for all s
 
 const canvas = document.getElementById("box") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
-let gridLevel: number | null = 3; // 1 = axes only, 2 = integer grid, 3 = half‑step grid
+
+// ----- Grid level management with automatic redraw -----
+let _gridLevel: number | null = 3; // 1 = axes only, 2 = integer grid, 3 = half‑step grid
+let gridDirty = true; // set to true when canvas size changes or gridLevel changes
+
+function setGridLevel(level: number | null): void {
+  _gridLevel = level;
+  gridDirty = true;
+}
+// For external access (console)
+Object.defineProperty(window, 'gridLevel', {
+  get: () => _gridLevel,
+  set: (val: number | null) => setGridLevel(val)
+});
 
 // ----- Offscreen canvas for grid caching -----
 let offscreenCanvas: HTMLCanvasElement | null = null;
 let offscreenCtx: CanvasRenderingContext2D | null = null;
-let gridDirty = true; // set to true when canvas size changes or gridLevel changes
 
 // ----- 2D vector with coordinate transformations -----
 interface Vec2Params {
@@ -118,18 +134,6 @@ class Vec2 {
     ctx.fillStyle = color;
     ctx.fillRect(x - pointSize / 2, y - pointSize / 2, pointSize, pointSize);
   }
-
-  // Draw a line from this vector to another (deprecated for batch drawing)
-  drawLineTo(other: Vec2, width = 2, color = "#FFFFFF"): void {
-    const from = this.normalized();
-    const to = other.normalized();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-  }
 }
 
 // ----- Abstract base class for all drawable objects -----
@@ -170,6 +174,8 @@ class PropertyAnimation<T> {
     const t = elapsed / this.duration;
     if (this.start instanceof Vec2 && this.target instanceof Vec2) {
       return (this.start as Vec2).lerp(this.target as Vec2, t) as T;
+    } else if (this.start instanceof Color && this.target instanceof Color) {
+      return (this.start as Color).lerp(this.target as Color, t) as T;
     } else {
       return lerp(this.start as number, this.target as number, t) as T;
     }
@@ -185,24 +191,41 @@ interface Animations {
   translation: PropertyAnimation<Vec2> | null;
   scale: PropertyAnimation<Vec2> | null;
   rotation: PropertyAnimation<number> | null;
+  strokeColor: PropertyAnimation<Color> | null;
+  fillColor: PropertyAnimation<Color> | null;
+  opacity: PropertyAnimation<number> | null;
+  lineDash: PropertyAnimation<number[]> | null;      // not interpolated yet
+  lineCap: PropertyAnimation<CanvasLineCap> | null; // not interpolated
+  lineJoin: PropertyAnimation<CanvasLineJoin> | null; // not interpolated
 }
 
 abstract class BaseShape extends Drawable {
   vertices: Vec2[];
-  color: Color;
+  strokeColor: Color;
+  fillColor: Color | null;
+  lineDash: number[];
+  lineCap: CanvasLineCap;
+  lineJoin: CanvasLineJoin;
+  opacity: number; // 0-1
   pointSize: number;
   closed: boolean;
-  translation: Vec2;
-  scale: Vec2;
-  rotation: number;
   progress: number;
   animationStart: number | null;
   animations: Animations;
   revealDuration: number;          // total time for reveal animation (ms)
 
+  // Per‑vertex colors
+  vertexColors: Color[] | null;
+  private usePerVertexColors: boolean = false;
+
   // Performance optimizations
   private cachedTransformed: { x: number; y: number }[] | null = null;
   private dirtyTransform = true;    // set when translation/scale/rotation changes
+
+  // Transform properties made private to enforce cache invalidation
+  private _translation: Vec2;
+  private _scale: Vec2;
+  private _rotation: number;
 
   constructor(
     id: number,
@@ -215,36 +238,64 @@ abstract class BaseShape extends Drawable {
   ) {
     super(id);
     this.vertices = vertices;
-    this.color = Color.random();
+    this.strokeColor = Color.random();
+    this.fillColor = null;
+    this.lineDash = [];
+    this.lineCap = 'butt';
+    this.lineJoin = 'miter';
+    this.opacity = 1.0;
     this.pointSize = pointSize;
     this.closed = closed;
-    this.translation = new Vec2(translation);
-    this.scale = new Vec2(scale);
-    this.rotation = rotation;
+    this._translation = new Vec2(translation);
+    this._scale = new Vec2(scale);
+    this._rotation = rotation;
     this.progress = 0;
     this.animationStart = null;
     this.animations = {
       translation: null,
       scale: null,
       rotation: null,
+      strokeColor: null,
+      fillColor: null,
+      opacity: null,
+      lineDash: null,
+      lineCap: null,
+      lineJoin: null,
     };
     this.revealDuration = ANIMATION_DURATION;
+    this.vertexColors = null;
   }
 
-  // Mark transform as dirty when any transform property changes
-  setTranslation(t: Vec2): void {
-    this.translation = t;
+  // Getters and setters for transform properties
+  get translation(): Vec2 { return this._translation; }
+  set translation(t: Vec2) {
+    this._translation = t;
     this.dirtyTransform = true;
   }
 
-  setScale(s: Vec2): void {
-    this.scale = s;
+  get scale(): Vec2 { return this._scale; }
+  set scale(s: Vec2) {
+    this._scale = s;
     this.dirtyTransform = true;
   }
 
-  setRotation(r: number): void {
-    this.rotation = r;
+  get rotation(): number { return this._rotation; }
+  set rotation(r: number) {
+    this._rotation = r;
     this.dirtyTransform = true;
+  }
+
+  // Backward compatibility: get/set color as strokeColor
+  get color(): Color { return this.strokeColor; }
+  set color(c: Color) { this.strokeColor = c; }
+
+  // Set per‑vertex colors (must match vertices length)
+  setVertexColors(colors: Color[] | null): void {
+    if (colors && colors.length !== this.vertices.length) {
+      throw new Error(`Vertex colors length (${colors.length}) must match vertices length (${this.vertices.length})`);
+    }
+    this.vertexColors = colors;
+    this.usePerVertexColors = colors !== null;
   }
 
   // Update any active animations based on current time
@@ -252,32 +303,64 @@ abstract class BaseShape extends Drawable {
     if (this.animations.translation) {
       const anim = this.animations.translation;
       if (anim.isFinished(now)) {
-        this.setTranslation(anim.target);
+        this.translation = anim.target;
         this.animations.translation = null;
       } else {
-        this.setTranslation(anim.value(now));
+        this.translation = anim.value(now);
       }
     }
 
     if (this.animations.scale) {
       const anim = this.animations.scale;
       if (anim.isFinished(now)) {
-        this.setScale(anim.target);
+        this.scale = anim.target;
         this.animations.scale = null;
       } else {
-        this.setScale(anim.value(now));
+        this.scale = anim.value(now);
       }
     }
 
     if (this.animations.rotation) {
       const anim = this.animations.rotation;
       if (anim.isFinished(now)) {
-        this.setRotation(anim.target);
+        this.rotation = anim.target;
         this.animations.rotation = null;
       } else {
-        this.setRotation(anim.value(now));
+        this.rotation = anim.value(now);
       }
     }
+
+    if (this.animations.strokeColor) {
+      const anim = this.animations.strokeColor;
+      if (anim.isFinished(now)) {
+        this.strokeColor = anim.target;
+        this.animations.strokeColor = null;
+      } else {
+        this.strokeColor = anim.value(now);
+      }
+    }
+
+    if (this.animations.fillColor) {
+      const anim = this.animations.fillColor;
+      if (anim.isFinished(now)) {
+        this.fillColor = anim.target;
+        this.animations.fillColor = null;
+      } else {
+        this.fillColor = anim.value(now);
+      }
+    }
+
+    if (this.animations.opacity) {
+      const anim = this.animations.opacity;
+      if (anim.isFinished(now)) {
+        this.opacity = anim.target;
+        this.animations.opacity = null;
+      } else {
+        this.opacity = anim.value(now);
+      }
+    }
+
+    // lineDash, lineCap, lineJoin are not animated
   }
 
   // Compute transformed screen coordinates for all vertices
@@ -308,33 +391,84 @@ abstract class BaseShape extends Drawable {
     return transformed;
   }
 
-  // Draw all segments up to current progress using a single Path2D
+  // Draw the shape with current styling
   draw(): void {
     if (!this.active || this.progress === 0) return;
 
     const points = this.getTransformedPoints();
     const count = this.progress;
 
-    // Build the path
-    const path = new Path2D();
-    path.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < count; i++) {
-      path.lineTo(points[i].x, points[i].y);
+    // Special case: only one vertex revealed → draw a point
+    if (count === 1) {
+      ctx.save();
+      ctx.globalAlpha = this.opacity;
+      ctx.fillStyle = this.strokeColor.toString();
+      ctx.fillRect(points[0].x - this.pointSize/2, points[0].y - this.pointSize/2, this.pointSize, this.pointSize);
+      ctx.restore();
+      return;
     }
 
-    // If closed and fully drawn, add the closing segment
-    if (this.closed && count === this.vertices.length) {
-      path.lineTo(points[0].x, points[0].y);
-    }
-
-    // Stroke the path once
-    ctx.strokeStyle = this.color.toString();
+    // Save context state
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
     ctx.lineWidth = this.pointSize;
-    ctx.stroke(path);
+    ctx.setLineDash(this.lineDash);
+    ctx.lineCap = this.lineCap;
+    ctx.lineJoin = this.lineJoin;
+
+    if (this.usePerVertexColors && this.vertexColors) {
+      // Draw each segment individually with the color of the start vertex
+      for (let i = 0; i < count - 1; i++) {
+        const start = points[i];
+        const end = points[i + 1];
+        ctx.strokeStyle = this.vertexColors[i].toString();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+      // If closed and fully drawn, draw closing segment with color of last vertex
+      if (this.closed && count === this.vertices.length) {
+        const start = points[count - 1];
+        const end = points[0];
+        ctx.strokeStyle = this.vertexColors[count - 1].toString();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    } else {
+      // Batch drawing: build a single path and fill/stroke with uniform colors
+      const path = new Path2D();
+      path.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < count; i++) {
+        path.lineTo(points[i].x, points[i].y);
+      }
+      if (this.closed && count === this.vertices.length) {
+        path.lineTo(points[0].x, points[0].y);
+      }
+
+      // Fill if fillColor is set
+      if (this.fillColor) {
+        ctx.fillStyle = this.fillColor.toString();
+        ctx.fill(path);
+      }
+
+      // Stroke with strokeColor
+      ctx.strokeStyle = this.strokeColor.toString();
+      ctx.stroke(path);
+    }
+
+    ctx.restore();
+  }
+
+  // Mark transform as dirty (for external invalidation on resize)
+  invalidateTransformCache(): void {
+    this.dirtyTransform = true;
   }
 }
 
-// ----- Specific shape classes -----
+// ----- Specific shape classes (unchanged except constructor signatures) -----
 class FShape extends BaseShape {
   constructor(id: number, fun: (x: number) => number) {
     const vertices: Vec2[] = [];
@@ -481,23 +615,26 @@ function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number):
     const dy = vertices[i].y - vertices[i-1].y;
     dist.push(dist[i-1] + Math.sqrt(dx*dx + dy*dy));
   }
+
   if (closed) {
-    // Sample along the perimeter including the closing edge.
-    const segments: { start: Vec2; end: Vec2; len: number; cum: number }[] = [];
-    let total = 0;
-    for (let i = 0; i < vertices.length - 1; i++) {
-      const dx = vertices[i+1].x - vertices[i].x;
-      const dy = vertices[i+1].y - vertices[i].y;
-      const len = Math.sqrt(dx*dx + dy*dy);
-      segments.push({ start: vertices[i], end: vertices[i+1], len, cum: total + len });
-      total += len;
-    }
-    // closing segment
+    // Include the closing edge
     const dx = vertices[0].x - vertices[vertices.length-1].x;
     const dy = vertices[0].y - vertices[vertices.length-1].y;
-    const len = Math.sqrt(dx*dx + dy*dy);
-    segments.push({ start: vertices[vertices.length-1], end: vertices[0], len, cum: total + len });
-    total += len;
+    const closingLen = Math.sqrt(dx*dx + dy*dy);
+    const total = dist[dist.length-1] + closingLen;
+
+    const segments: { start: Vec2; end: Vec2; len: number; cum: number }[] = [];
+    for (let i = 0; i < vertices.length - 1; i++) {
+      const len = dist[i+1] - dist[i];
+      segments.push({ start: vertices[i], end: vertices[i+1], len, cum: dist[i+1] });
+    }
+    // closing segment
+    segments.push({
+      start: vertices[vertices.length-1],
+      end: vertices[0],
+      len: closingLen,
+      cum: total
+    });
 
     const result: Vec2[] = [];
     for (let i = 0; i < numPoints; i++) {
@@ -513,6 +650,10 @@ function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number):
       const x = lerp(seg.start.x, seg.end.x, segT);
       const y = lerp(seg.start.y, seg.end.y, segT);
       result.push(new Vec2({ x, y }));
+    }
+    // Ensure last point equals first for perfect closure (avoid gaps)
+    if (result.length > 0) {
+      result[result.length-1] = new Vec2({ x: result[0].x, y: result[0].y });
     }
     return result;
   } else {
@@ -537,13 +678,11 @@ function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number):
 
 // ----- MorphShape: interpolates between two shapes over time, handles different vertex counts -----
 class MorphShape extends Drawable {
-  id1: number;
-  id2: number;
-  duration: number;
+  private id1: number;
+  private id2: number;
+  private duration: number;
   pointSize: number;
-  animationStart: number;
-  private resampled1: Vec2[] | null = null;
-  private resampled2: Vec2[] | null = null;
+  private animationStart: number;
   private scene: Scene;
 
   constructor(id: number, scene: Scene, id1: number, id2: number, duration = ANIMATION_DURATION) {
@@ -559,46 +698,64 @@ class MorphShape extends Drawable {
   draw(): void {
     if (!this.active) return;
 
-    const shape1 = this.scene.getShape(this.id1) as BaseShape;
-    const shape2 = this.scene.getShape(this.id2) as BaseShape;
+    const shape1 = this.scene.getShape(this.id1);
+    const shape2 = this.scene.getShape(this.id2);
     if (!shape1 || !shape2 || !shape1.active || !shape2.active) return;
+    // Ensure they are BaseShapes (morph only works between BaseShapes)
+    if (!(shape1 instanceof BaseShape) || !(shape2 instanceof BaseShape)) {
+      console.warn('MorphShape only supports BaseShape sources.');
+      return;
+    }
 
     const count = Math.max(shape1.vertices.length, shape2.vertices.length);
-    if (!this.resampled1 || this.resampled1.length !== count) {
-      this.resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
-    }
-    if (!this.resampled2 || this.resampled2.length !== count) {
-      this.resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
-    }
+    // Resample based on current vertices each frame (sources are static, but safe)
+    const resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
+    const resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
 
     const now = performance.now();
     const elapsed = now - this.animationStart;
-    const t = Math.min(elapsed / this.duration, 1);
+    let t = elapsed / this.duration;
+    if (this.duration <= 0) t = 1; // avoid division by zero
+    else t = Math.min(t, 1);
 
     const trans = shape1.translation.lerp(shape2.translation, t);
     const scale = shape1.scale.lerp(shape2.scale, t);
     const rot = lerp(shape1.rotation, shape2.rotation, t);
-    const color = shape1.color.lerp(shape2.color, t);
-    const colorStr = color.toString();
+    const strokeColor = shape1.strokeColor.lerp(shape2.strokeColor, t);
+    const fillColor = shape1.fillColor && shape2.fillColor ? shape1.fillColor.lerp(shape2.fillColor, t) : (shape1.fillColor || shape2.fillColor);
+    const opacity = lerp(shape1.opacity, shape2.opacity, t);
 
     const transformed: Vec2[] = [];
     for (let i = 0; i < count; i++) {
-      const v = this.resampled1[i].lerp(this.resampled2[i], t);
+      const v = resampled1[i].lerp(resampled2[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
       transformed.push(rotated.add(trans));
     }
 
-    // Draw each segment (morph uses simple line drawing for now)
-    for (let i = 0; i < count - 1; i++) {
-      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.lineWidth = this.pointSize;
+    ctx.strokeStyle = strokeColor.toString();
+    if (fillColor) ctx.fillStyle = fillColor.toString();
+
+    const path = new Path2D();
+    path.moveTo(transformed[0].x, transformed[0].y);
+    for (let i = 1; i < count; i++) {
+      path.lineTo(transformed[i].x, transformed[i].y);
     }
     if (shape2.closed) {
-      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
+      path.lineTo(transformed[0].x, transformed[0].y);
     }
+
+    if (fillColor) ctx.fill(path);
+    ctx.stroke(path);
+    ctx.restore();
 
     if (elapsed >= this.duration) {
       this.active = false;
+      // Automatically remove from scene when finished
+      this.scene.remove(this.id);
     }
   }
 }
@@ -613,20 +770,23 @@ function resize(): void {
   canvas.width = s;
   canvas.height = s;
   gridDirty = true; // offscreen grid needs redraw
+
+  // Invalidate all shape transform caches because canvas size changed
+  if (window.scene) {
+    (window.scene as Scene).invalidateAllTransforms();
+  }
 }
 window.addEventListener("resize", resize);
 
-// ----- Text drawing helper (accepts Vec2) with offset to avoid overlap -----
+// ----- Text drawing helper (accepts Vec2) with improved alignment -----
 function drawText(vec2: Vec2, text: string, fontSize = 14, color = "#00FFFF"): void {
   const { x, y } = vec2.normalized();
   ctx.fillStyle = color;
   ctx.font = `${fontSize}px sans-serif`;
+  // Align to avoid overlapping with axes
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillText(text, x + 8, y + 8);
-}
-
-// ----- Simple line wrapper (for grid drawing, not used by shapes) -----
-function drawLine(begin: Vec2, end: Vec2, width = 2, color = "#FFFFFF"): void {
-  begin.drawLineTo(end, width, color);
 }
 
 // ----- Clear canvas to black -----
@@ -635,9 +795,9 @@ function clearBackground(): void {
   ctx.fillRect(0, 0, boxSize(), boxSize());
 }
 
-// ----- Draw grid using offscreen caching -----
+// ----- Draw grid using offscreen caching with improved label placement -----
 function drawGrid(): void {
-  if (!gridLevel) return;
+  if (!_gridLevel) return;
 
   const size = boxSize();
   // Ensure offscreen canvas exists and matches size
@@ -671,7 +831,7 @@ function drawGrid(): void {
     };
 
     // Axes (level ≥ 1)
-    if (gridLevel >= 1) {
+    if (_gridLevel >= 1) {
       line(0, half, size, half, 3, "#FFFFFF"); // x-axis in screen coords
       line(half, 0, half, size, 3, "#FFFFFF"); // y-axis
     }
@@ -679,10 +839,10 @@ function drawGrid(): void {
     // Horizontal lines and labels (lines go to offscreen, labels drawn later)
     for (let i = -scaleY; i <= scaleY; i++) {
       const yScreen = half * (1 - i / scaleY);
-      if (gridLevel >= 2) {
+      if (_gridLevel >= 2) {
         line(0, yScreen, size, yScreen, 1, "#FFFFFF");
       }
-      if (gridLevel === 3) {
+      if (_gridLevel === 3) {
         const yHalf = half * (1 - (i + 0.5) / scaleY);
         line(0, yHalf, size, yHalf, 0.3, "#FFFFFF");
       }
@@ -691,10 +851,10 @@ function drawGrid(): void {
     // Vertical lines
     for (let i = -scaleX; i <= scaleX; i++) {
       const xScreen = half * (1 + i / scaleX);
-      if (gridLevel >= 2) {
+      if (_gridLevel >= 2) {
         line(xScreen, 0, xScreen, size, 1, "#FFFFFF");
       }
-      if (gridLevel === 3) {
+      if (_gridLevel === 3) {
         const xHalf = half * (1 + (i + 0.5) / scaleX);
         line(xHalf, 0, xHalf, size, 0.3, "#FFFFFF");
       }
@@ -706,17 +866,24 @@ function drawGrid(): void {
   // Draw the offscreen canvas onto the main canvas
   ctx.drawImage(offscreenCanvas!, 0, 0);
 
-  // Now draw labels (they are not cached to keep them sharp)
+  // Draw labels with improved alignment
   ctx.fillStyle = "#00FFFF";
   ctx.font = "14px sans-serif";
   const half = size / 2;
+
+  // Y-axis labels (left side)
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
   for (let i = -CONFIG.scaleY; i <= CONFIG.scaleY; i++) {
     const yScreen = half * (1 - i / CONFIG.scaleY);
-    ctx.fillText(i.toString(), 8, yScreen + 8);
+    ctx.fillText(i.toString(), half - 8, yScreen);
   }
+  // X-axis labels (bottom)
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   for (let i = -CONFIG.scaleX; i <= CONFIG.scaleX; i++) {
     const xScreen = half * (1 + i / CONFIG.scaleX);
-    ctx.fillText(i.toString(), xScreen + 8, 8);
+    ctx.fillText(i.toString(), xScreen, half + 8);
   }
 }
 
@@ -745,6 +912,53 @@ class ShapeRef {
     return this;
   }
 
+  // Styling methods
+  stroke(color: Color | string, duration = 0): this {
+    const col = typeof color === 'string' ? parseColor(color) : color;
+    this.scene.strokeColor(this.id, col, duration);
+    return this;
+  }
+
+  fill(color: Color | string | null, duration = 0): this {
+    if (color === null) {
+      this.scene.fillColor(this.id, null, duration);
+    } else {
+      const col = typeof color === 'string' ? parseColor(color) : color;
+      this.scene.fillColor(this.id, col, duration);
+    }
+    return this;
+  }
+
+  opacity(value: number, duration = 0): this {
+    this.scene.opacity(this.id, value, duration);
+    return this;
+  }
+
+  lineDash(dashArray: number[], duration = 0): this {
+    this.scene.lineDash(this.id, dashArray, duration);
+    return this;
+  }
+
+  lineCap(cap: CanvasLineCap, duration = 0): this {
+    this.scene.lineCap(this.id, cap, duration);
+    return this;
+  }
+
+  lineJoin(join: CanvasLineJoin, duration = 0): this {
+    this.scene.lineJoin(this.id, join, duration);
+    return this;
+  }
+
+  vertexColors(colors: (Color | string)[] | null, duration = 0): this {
+    if (colors === null) {
+      this.scene.vertexColors(this.id, null, duration);
+    } else {
+      const cols = colors.map(c => typeof c === 'string' ? parseColor(c) : c);
+      this.scene.vertexColors(this.id, cols, duration);
+    }
+    return this;
+  }
+
   reveal(duration: number = ANIMATION_DURATION): this {
     this.scene.reveal(this.id, duration);
     return this;
@@ -760,7 +974,61 @@ class ShapeRef {
   }
 }
 
-// ==================== SCENE CLASS (with Map, pause support, and recording) ====================
+// Enhanced color parser supporting #rgb, #rrggbb, #rgba, #rrggbbaa, rgb(r,g,b), rgba(r,g,b,a)
+function parseColor(str: string): Color {
+  str = str.trim().toLowerCase();
+
+  // #rgb / #rrggbb / #rgba / #rrggbbaa
+  if (str.startsWith('#')) {
+    const hex = str.slice(1);
+    let r, g, b, a = 1;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 4) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+      a = parseInt(hex[3] + hex[3], 16) / 255;
+    } else if (hex.length === 6) {
+      r = parseInt(hex.slice(0,2), 16);
+      g = parseInt(hex.slice(2,4), 16);
+      b = parseInt(hex.slice(4,6), 16);
+    } else if (hex.length === 8) {
+      r = parseInt(hex.slice(0,2), 16);
+      g = parseInt(hex.slice(2,4), 16);
+      b = parseInt(hex.slice(4,6), 16);
+      a = parseInt(hex.slice(6,8), 16) / 255;
+    } else {
+      throw new Error(`Invalid hex color: ${str}`);
+    }
+    return new Color(r, g, b, a);
+  }
+
+  // rgb(r,g,b) or rgba(r,g,b,a)
+  const rgbMatch = str.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+  if (rgbMatch) {
+    return new Color(
+      parseInt(rgbMatch[1]),
+      parseInt(rgbMatch[2]),
+      parseInt(rgbMatch[3])
+    );
+  }
+  const rgbaMatch = str.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\s*\)$/);
+  if (rgbaMatch) {
+    return new Color(
+      parseInt(rgbaMatch[1]),
+      parseInt(rgbaMatch[2]),
+      parseInt(rgbaMatch[3]),
+      parseFloat(rgbaMatch[4])
+    );
+  }
+
+  throw new Error(`Unsupported color string: ${str}`);
+}
+
+// ==================== SCENE CLASS ====================
 class Scene {
   private shapes: Map<number, Drawable> = new Map();
   private nextId: number = 0;
@@ -772,13 +1040,22 @@ class Scene {
   private recordingDuration: number | null = null;
   private recordingTimeout: number | null = null;
 
-  // Pause state
-  private pauseStart: number | null = null;        // when the current pause began
-  private pauseDuration: number | null = null;      // how long the pause should last
-  private totalPausedTime: number = 0;               // cumulative paused time
+  // Pause state (simple, not queued – subsequent waits replace previous)
+  private pauseStart: number | null = null;
+  private pauseDuration: number | null = null;
+  private totalPausedTime: number = 0;
 
   getShape(id: number): Drawable | undefined {
     return this.shapes.get(id);
+  }
+
+  // Invalidate all shape transform caches (called on resize)
+  invalidateAllTransforms(): void {
+    for (const shape of this.shapes.values()) {
+      if (shape instanceof BaseShape) {
+        shape.invalidateTransformCache();
+      }
+    }
   }
 
   // ----- Shape factories -----
@@ -847,10 +1124,10 @@ class Scene {
         shape.translation,
         new Vec2({ x, y }),
         duration,
-        performance.now() - this.totalPausedTime  // subtract paused time to keep sync
+        performance.now() - this.totalPausedTime
       );
     } else {
-      shape.setTranslation(new Vec2({ x, y }));
+      shape.translation = new Vec2({ x, y });
       shape.animations.translation = null;
     }
   }
@@ -866,7 +1143,7 @@ class Scene {
         performance.now() - this.totalPausedTime
       );
     } else {
-      shape.setScale(new Vec2({ x: sx, y: sy }));
+      shape.scale = new Vec2({ x: sx, y: sy });
       shape.animations.scale = null;
     }
   }
@@ -882,9 +1159,82 @@ class Scene {
         performance.now() - this.totalPausedTime
       );
     } else {
-      shape.setRotation(angle);
+      shape.rotation = angle;
       shape.animations.rotation = null;
     }
+  }
+
+  // ----- Styling setters -----
+  strokeColor(id: number, color: Color, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0) {
+      shape.animations.strokeColor = new PropertyAnimation<Color>(
+        shape.strokeColor,
+        color,
+        duration,
+        performance.now() - this.totalPausedTime
+      );
+    } else {
+      shape.strokeColor = color;
+      shape.animations.strokeColor = null;
+    }
+  }
+
+  fillColor(id: number, color: Color | null, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0 && color !== null) {
+      shape.animations.fillColor = new PropertyAnimation<Color>(
+        shape.fillColor || new Color(0,0,0,0),
+        color,
+        duration,
+        performance.now() - this.totalPausedTime
+      );
+    } else {
+      shape.fillColor = color;
+      shape.animations.fillColor = null;
+    }
+  }
+
+  opacity(id: number, value: number, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0) {
+      shape.animations.opacity = new PropertyAnimation<number>(
+        shape.opacity,
+        value,
+        duration,
+        performance.now() - this.totalPausedTime
+      );
+    } else {
+      shape.opacity = value;
+      shape.animations.opacity = null;
+    }
+  }
+
+  lineDash(id: number, dashArray: number[], duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    shape.lineDash = dashArray;
+  }
+
+  lineCap(id: number, cap: CanvasLineCap, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    shape.lineCap = cap;
+  }
+
+  lineJoin(id: number, join: CanvasLineJoin, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    shape.lineJoin = join;
+  }
+
+  vertexColors(id: number, colors: Color[] | null, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    shape.setVertexColors(colors);
   }
 
   // ----- Morph -----
@@ -894,7 +1244,6 @@ class Scene {
     }
     const morphId = this.nextId++;
     const morph = new MorphShape(morphId, this, id1, id2, duration);
-    // Adjust morph start time to account for already paused time
     morph.animationStart -= this.totalPausedTime;
     this.shapes.set(morphId, morph);
     return morphId;
@@ -916,11 +1265,10 @@ class Scene {
     this.shapes.delete(id);
   }
 
-  // ----- WAIT: pauses all animation progress for the given duration -----
-  wait(ms: number): this {
-    // If already paused, we could extend the pause, but for simplicity we start a new pause from now.
+  // ----- WAIT (simple pause, overwrites any ongoing pause) -----
+  wait(seconds: number): this {
     this.pauseStart = performance.now();
-    this.pauseDuration = ms;
+    this.pauseDuration = seconds * 1000;
     return this;
   }
 
@@ -993,59 +1341,45 @@ class Scene {
     if (this.pauseStart !== null && this.pauseDuration !== null) {
       const elapsedPause = now - this.pauseStart;
       if (elapsedPause < this.pauseDuration) {
-        // Still paused – do not update any shapes
         return;
       } else {
-        // Pause finished: adjust all timestamps by the actual pause duration
         const actualPause = Math.min(elapsedPause, this.pauseDuration);
         this.totalPausedTime += actualPause;
 
-        // Adjust timestamps for all shapes
         for (const shape of this.shapes.values()) {
           if (shape instanceof BaseShape) {
-            // Adjust reveal start time
             if (shape.animationStart !== null) {
               shape.animationStart += actualPause;
             }
-            // Adjust property animations start times
-            if (shape.animations.translation) {
-              shape.animations.translation.startTime += actualPause;
-            }
-            if (shape.animations.scale) {
-              shape.animations.scale.startTime += actualPause;
-            }
-            if (shape.animations.rotation) {
-              shape.animations.rotation.startTime += actualPause;
-            }
+            if (shape.animations.translation) shape.animations.translation.startTime += actualPause;
+            if (shape.animations.scale) shape.animations.scale.startTime += actualPause;
+            if (shape.animations.rotation) shape.animations.rotation.startTime += actualPause;
+            if (shape.animations.strokeColor) shape.animations.strokeColor.startTime += actualPause;
+            if (shape.animations.fillColor) shape.animations.fillColor.startTime += actualPause;
+            if (shape.animations.opacity) shape.animations.opacity.startTime += actualPause;
           } else if (shape instanceof MorphShape) {
             shape.animationStart += actualPause;
           }
         }
 
-        // Clear pause state
         this.pauseStart = null;
         this.pauseDuration = null;
       }
     }
 
-    // Compute effective time (wall time minus total paused time)
     const effectiveNow = now - this.totalPausedTime;
 
-    // Now update shapes using effectiveNow
     for (const shape of this.shapes.values()) {
       if (shape instanceof BaseShape && shape.active) {
-        // Update drawing progress
         if (shape.animationStart !== null) {
           const elapsed = effectiveNow - shape.animationStart;
           const t = Math.min(elapsed / shape.revealDuration, 1);
           const targetProgress = Math.floor(t * shape.vertices.length);
           shape.progress = Math.min(targetProgress, shape.vertices.length);
-
           if (elapsed >= shape.revealDuration) {
             shape.animationStart = null;
           }
         }
-        // Update transformation animations
         shape.updateAnimations(effectiveNow);
       }
     }
@@ -1079,6 +1413,8 @@ class Scene {
 
 // ==================== GLOBAL SETUP ====================
 const scene = new Scene();
+// Expose scene to console
+(window as any).scene = scene;
 
 function animate(): void {
   scene.animate(performance.now());
@@ -1086,11 +1422,10 @@ function animate(): void {
 }
 
 function main(): void {
-  gridLevel = 3;
+  setGridLevel(3); // use setter to ensure gridDirty = true
   resize();
   requestAnimationFrame(animate);
 }
 main();
 
-// Expose scene to console
-(window as any).scene = scene;
+// Also expose gridLevel setter globally (already done via property definition)

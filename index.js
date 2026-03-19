@@ -5,19 +5,21 @@ class Color {
   r;
   g;
   b;
-  constructor(r, g, b) {
+  a = 1;
+  constructor(r, g, b, a = 1) {
     this.r = r;
     this.g = g;
     this.b = b;
+    this.a = a;
   }
   lerp(other, t) {
-    return new Color(lerp(this.r, other.r, t), lerp(this.g, other.g, t), lerp(this.b, other.b, t));
+    return new Color(lerp(this.r, other.r, t), lerp(this.g, other.g, t), lerp(this.b, other.b, t), lerp(this.a, other.a, t));
   }
   static random() {
     return new Color(Math.floor(Math.random() * 256), Math.floor(Math.random() * 256), Math.floor(Math.random() * 256));
   }
   toString() {
-    return `rgb(${this.r}, ${this.g}, ${this.b})`;
+    return `rgba(${this.r}, ${this.g}, ${this.b}, ${this.a})`;
   }
 }
 var CONFIG = {
@@ -31,10 +33,18 @@ var ANIMATION_DURATION = TOTAL_FRAMES * DDT;
 var NUM_VERTICES = 1000;
 var canvas = document.getElementById("box");
 var ctx = canvas.getContext("2d");
-var gridLevel = 3;
+var _gridLevel = 3;
+var gridDirty = true;
+function setGridLevel(level) {
+  _gridLevel = level;
+  gridDirty = true;
+}
+Object.defineProperty(window, "gridLevel", {
+  get: () => _gridLevel,
+  set: (val) => setGridLevel(val)
+});
 var offscreenCanvas = null;
 var offscreenCtx = null;
-var gridDirty = true;
 
 class Vec2 {
   x;
@@ -79,16 +89,6 @@ class Vec2 {
     ctx.fillStyle = color;
     ctx.fillRect(x - pointSize / 2, y - pointSize / 2, pointSize, pointSize);
   }
-  drawLineTo(other, width = 2, color = "#FFFFFF") {
-    const from = this.normalized();
-    const to = other.normalized();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-  }
 }
 
 class Drawable {
@@ -121,6 +121,8 @@ class PropertyAnimation {
     const t = elapsed / this.duration;
     if (this.start instanceof Vec2 && this.target instanceof Vec2) {
       return this.start.lerp(this.target, t);
+    } else if (this.start instanceof Color && this.target instanceof Color) {
+      return this.start.lerp(this.target, t);
     } else {
       return lerp(this.start, this.target, t);
     }
@@ -132,74 +134,142 @@ class PropertyAnimation {
 
 class BaseShape extends Drawable {
   vertices;
-  color;
+  strokeColor;
+  fillColor;
+  lineDash;
+  lineCap;
+  lineJoin;
+  opacity;
   pointSize;
   closed;
-  translation;
-  scale;
-  rotation;
   progress;
   animationStart;
   animations;
   revealDuration;
+  vertexColors;
+  usePerVertexColors = false;
   cachedTransformed = null;
   dirtyTransform = true;
+  _translation;
+  _scale;
+  _rotation;
   constructor(id, vertices, pointSize = 2, closed = false, translation = { x: 0, y: 0 }, scale = { x: 1, y: 1 }, rotation = 0) {
     super(id);
     this.vertices = vertices;
-    this.color = Color.random();
+    this.strokeColor = Color.random();
+    this.fillColor = null;
+    this.lineDash = [];
+    this.lineCap = "butt";
+    this.lineJoin = "miter";
+    this.opacity = 1;
     this.pointSize = pointSize;
     this.closed = closed;
-    this.translation = new Vec2(translation);
-    this.scale = new Vec2(scale);
-    this.rotation = rotation;
+    this._translation = new Vec2(translation);
+    this._scale = new Vec2(scale);
+    this._rotation = rotation;
     this.progress = 0;
     this.animationStart = null;
     this.animations = {
       translation: null,
       scale: null,
-      rotation: null
+      rotation: null,
+      strokeColor: null,
+      fillColor: null,
+      opacity: null,
+      lineDash: null,
+      lineCap: null,
+      lineJoin: null
     };
     this.revealDuration = ANIMATION_DURATION;
+    this.vertexColors = null;
   }
-  setTranslation(t) {
-    this.translation = t;
+  get translation() {
+    return this._translation;
+  }
+  set translation(t) {
+    this._translation = t;
     this.dirtyTransform = true;
   }
-  setScale(s) {
-    this.scale = s;
+  get scale() {
+    return this._scale;
+  }
+  set scale(s) {
+    this._scale = s;
     this.dirtyTransform = true;
   }
-  setRotation(r) {
-    this.rotation = r;
+  get rotation() {
+    return this._rotation;
+  }
+  set rotation(r) {
+    this._rotation = r;
     this.dirtyTransform = true;
+  }
+  get color() {
+    return this.strokeColor;
+  }
+  set color(c) {
+    this.strokeColor = c;
+  }
+  setVertexColors(colors) {
+    if (colors && colors.length !== this.vertices.length) {
+      throw new Error(`Vertex colors length (${colors.length}) must match vertices length (${this.vertices.length})`);
+    }
+    this.vertexColors = colors;
+    this.usePerVertexColors = colors !== null;
   }
   updateAnimations(now) {
     if (this.animations.translation) {
       const anim = this.animations.translation;
       if (anim.isFinished(now)) {
-        this.setTranslation(anim.target);
+        this.translation = anim.target;
         this.animations.translation = null;
       } else {
-        this.setTranslation(anim.value(now));
+        this.translation = anim.value(now);
       }
     }
     if (this.animations.scale) {
       const anim = this.animations.scale;
       if (anim.isFinished(now)) {
-        this.setScale(anim.target);
+        this.scale = anim.target;
         this.animations.scale = null;
       } else {
-        this.setScale(anim.value(now));
+        this.scale = anim.value(now);
       }
     }
     if (this.animations.rotation) {
       const anim = this.animations.rotation;
       if (anim.isFinished(now)) {
-        this.setRotation(anim.target);
+        this.rotation = anim.target;
         this.animations.rotation = null;
       } else {
-        this.setRotation(anim.value(now));
+        this.rotation = anim.value(now);
+      }
+    }
+    if (this.animations.strokeColor) {
+      const anim = this.animations.strokeColor;
+      if (anim.isFinished(now)) {
+        this.strokeColor = anim.target;
+        this.animations.strokeColor = null;
+      } else {
+        this.strokeColor = anim.value(now);
+      }
+    }
+    if (this.animations.fillColor) {
+      const anim = this.animations.fillColor;
+      if (anim.isFinished(now)) {
+        this.fillColor = anim.target;
+        this.animations.fillColor = null;
+      } else {
+        this.fillColor = anim.value(now);
+      }
+    }
+    if (this.animations.opacity) {
+      const anim = this.animations.opacity;
+      if (anim.isFinished(now)) {
+        this.opacity = anim.target;
+        this.animations.opacity = null;
+      } else {
+        this.opacity = anim.value(now);
       }
     }
   }
@@ -226,17 +296,59 @@ class BaseShape extends Drawable {
       return;
     const points = this.getTransformedPoints();
     const count = this.progress;
-    const path = new Path2D;
-    path.moveTo(points[0].x, points[0].y);
-    for (let i = 1;i < count; i++) {
-      path.lineTo(points[i].x, points[i].y);
+    if (count === 1) {
+      ctx.save();
+      ctx.globalAlpha = this.opacity;
+      ctx.fillStyle = this.strokeColor.toString();
+      ctx.fillRect(points[0].x - this.pointSize / 2, points[0].y - this.pointSize / 2, this.pointSize, this.pointSize);
+      ctx.restore();
+      return;
     }
-    if (this.closed && count === this.vertices.length) {
-      path.lineTo(points[0].x, points[0].y);
-    }
-    ctx.strokeStyle = this.color.toString();
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
     ctx.lineWidth = this.pointSize;
-    ctx.stroke(path);
+    ctx.setLineDash(this.lineDash);
+    ctx.lineCap = this.lineCap;
+    ctx.lineJoin = this.lineJoin;
+    if (this.usePerVertexColors && this.vertexColors) {
+      for (let i = 0;i < count - 1; i++) {
+        const start = points[i];
+        const end = points[i + 1];
+        ctx.strokeStyle = this.vertexColors[i].toString();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+      if (this.closed && count === this.vertices.length) {
+        const start = points[count - 1];
+        const end = points[0];
+        ctx.strokeStyle = this.vertexColors[count - 1].toString();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    } else {
+      const path = new Path2D;
+      path.moveTo(points[0].x, points[0].y);
+      for (let i = 1;i < count; i++) {
+        path.lineTo(points[i].x, points[i].y);
+      }
+      if (this.closed && count === this.vertices.length) {
+        path.lineTo(points[0].x, points[0].y);
+      }
+      if (this.fillColor) {
+        ctx.fillStyle = this.fillColor.toString();
+        ctx.fill(path);
+      }
+      ctx.strokeStyle = this.strokeColor.toString();
+      ctx.stroke(path);
+    }
+    ctx.restore();
+  }
+  invalidateTransformCache() {
+    this.dirtyTransform = true;
   }
 }
 
@@ -385,20 +497,21 @@ function resamplePolyline(vertices, closed, numPoints) {
     dist.push(dist[i - 1] + Math.sqrt(dx * dx + dy * dy));
   }
   if (closed) {
-    const segments = [];
-    let total = 0;
-    for (let i = 0;i < vertices.length - 1; i++) {
-      const dx2 = vertices[i + 1].x - vertices[i].x;
-      const dy2 = vertices[i + 1].y - vertices[i].y;
-      const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-      segments.push({ start: vertices[i], end: vertices[i + 1], len: len2, cum: total + len2 });
-      total += len2;
-    }
     const dx = vertices[0].x - vertices[vertices.length - 1].x;
     const dy = vertices[0].y - vertices[vertices.length - 1].y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    segments.push({ start: vertices[vertices.length - 1], end: vertices[0], len, cum: total + len });
-    total += len;
+    const closingLen = Math.sqrt(dx * dx + dy * dy);
+    const total = dist[dist.length - 1] + closingLen;
+    const segments = [];
+    for (let i = 0;i < vertices.length - 1; i++) {
+      const len = dist[i + 1] - dist[i];
+      segments.push({ start: vertices[i], end: vertices[i + 1], len, cum: dist[i + 1] });
+    }
+    segments.push({
+      start: vertices[vertices.length - 1],
+      end: vertices[0],
+      len: closingLen,
+      cum: total
+    });
     const result = [];
     for (let i = 0;i < numPoints; i++) {
       const t = i / numPoints;
@@ -414,6 +527,9 @@ function resamplePolyline(vertices, closed, numPoints) {
       const x = lerp(seg.start.x, seg.end.x, segT);
       const y = lerp(seg.start.y, seg.end.y, segT);
       result.push(new Vec2({ x, y }));
+    }
+    if (result.length > 0) {
+      result[result.length - 1] = new Vec2({ x: result[0].x, y: result[0].y });
     }
     return result;
   } else {
@@ -443,8 +559,6 @@ class MorphShape extends Drawable {
   duration;
   pointSize;
   animationStart;
-  resampled1 = null;
-  resampled2 = null;
   scene;
   constructor(id, scene, id1, id2, duration = ANIMATION_DURATION) {
     super(id);
@@ -462,36 +576,54 @@ class MorphShape extends Drawable {
     const shape2 = this.scene.getShape(this.id2);
     if (!shape1 || !shape2 || !shape1.active || !shape2.active)
       return;
+    if (!(shape1 instanceof BaseShape) || !(shape2 instanceof BaseShape)) {
+      console.warn("MorphShape only supports BaseShape sources.");
+      return;
+    }
     const count = Math.max(shape1.vertices.length, shape2.vertices.length);
-    if (!this.resampled1 || this.resampled1.length !== count) {
-      this.resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
-    }
-    if (!this.resampled2 || this.resampled2.length !== count) {
-      this.resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
-    }
+    const resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
+    const resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
     const now = performance.now();
     const elapsed = now - this.animationStart;
-    const t = Math.min(elapsed / this.duration, 1);
+    let t = elapsed / this.duration;
+    if (this.duration <= 0)
+      t = 1;
+    else
+      t = Math.min(t, 1);
     const trans = shape1.translation.lerp(shape2.translation, t);
     const scale = shape1.scale.lerp(shape2.scale, t);
     const rot = lerp(shape1.rotation, shape2.rotation, t);
-    const color = shape1.color.lerp(shape2.color, t);
-    const colorStr = color.toString();
+    const strokeColor = shape1.strokeColor.lerp(shape2.strokeColor, t);
+    const fillColor = shape1.fillColor && shape2.fillColor ? shape1.fillColor.lerp(shape2.fillColor, t) : shape1.fillColor || shape2.fillColor;
+    const opacity = lerp(shape1.opacity, shape2.opacity, t);
     const transformed = [];
     for (let i = 0;i < count; i++) {
-      const v = this.resampled1[i].lerp(this.resampled2[i], t);
+      const v = resampled1[i].lerp(resampled2[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
       transformed.push(rotated.add(trans));
     }
-    for (let i = 0;i < count - 1; i++) {
-      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.lineWidth = this.pointSize;
+    ctx.strokeStyle = strokeColor.toString();
+    if (fillColor)
+      ctx.fillStyle = fillColor.toString();
+    const path = new Path2D;
+    path.moveTo(transformed[0].x, transformed[0].y);
+    for (let i = 1;i < count; i++) {
+      path.lineTo(transformed[i].x, transformed[i].y);
     }
     if (shape2.closed) {
-      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
+      path.lineTo(transformed[0].x, transformed[0].y);
     }
+    if (fillColor)
+      ctx.fill(path);
+    ctx.stroke(path);
+    ctx.restore();
     if (elapsed >= this.duration) {
       this.active = false;
+      this.scene.remove(this.id);
     }
   }
 }
@@ -503,6 +635,9 @@ function resize() {
   canvas.width = s;
   canvas.height = s;
   gridDirty = true;
+  if (window.scene) {
+    window.scene.invalidateAllTransforms();
+  }
 }
 window.addEventListener("resize", resize);
 function clearBackground() {
@@ -510,7 +645,7 @@ function clearBackground() {
   ctx.fillRect(0, 0, boxSize(), boxSize());
 }
 function drawGrid() {
-  if (!gridLevel)
+  if (!_gridLevel)
     return;
   const size = boxSize();
   if (!offscreenCanvas || offscreenCanvas.width !== size || offscreenCanvas.height !== size) {
@@ -537,26 +672,26 @@ function drawGrid() {
       offscreenCtx.lineTo(x2, y2);
       offscreenCtx.stroke();
     };
-    if (gridLevel >= 1) {
+    if (_gridLevel >= 1) {
       line(0, half2, size, half2, 3, "#FFFFFF");
       line(half2, 0, half2, size, 3, "#FFFFFF");
     }
     for (let i = -scaleY;i <= scaleY; i++) {
       const yScreen = half2 * (1 - i / scaleY);
-      if (gridLevel >= 2) {
+      if (_gridLevel >= 2) {
         line(0, yScreen, size, yScreen, 1, "#FFFFFF");
       }
-      if (gridLevel === 3) {
+      if (_gridLevel === 3) {
         const yHalf = half2 * (1 - (i + 0.5) / scaleY);
         line(0, yHalf, size, yHalf, 0.3, "#FFFFFF");
       }
     }
     for (let i = -scaleX;i <= scaleX; i++) {
       const xScreen = half2 * (1 + i / scaleX);
-      if (gridLevel >= 2) {
+      if (_gridLevel >= 2) {
         line(xScreen, 0, xScreen, size, 1, "#FFFFFF");
       }
-      if (gridLevel === 3) {
+      if (_gridLevel === 3) {
         const xHalf = half2 * (1 + (i + 0.5) / scaleX);
         line(xHalf, 0, xHalf, size, 0.3, "#FFFFFF");
       }
@@ -567,13 +702,17 @@ function drawGrid() {
   ctx.fillStyle = "#00FFFF";
   ctx.font = "14px sans-serif";
   const half = size / 2;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
   for (let i = -CONFIG.scaleY;i <= CONFIG.scaleY; i++) {
     const yScreen = half * (1 - i / CONFIG.scaleY);
-    ctx.fillText(i.toString(), 8, yScreen + 8);
+    ctx.fillText(i.toString(), half - 8, yScreen);
   }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
   for (let i = -CONFIG.scaleX;i <= CONFIG.scaleX; i++) {
     const xScreen = half * (1 + i / CONFIG.scaleX);
-    ctx.fillText(i.toString(), xScreen + 8, 8);
+    ctx.fillText(i.toString(), xScreen, half + 8);
   }
 }
 
@@ -596,6 +735,45 @@ class ShapeRef {
     this.scene.rotate(this.id, angle, duration);
     return this;
   }
+  stroke(color, duration = 0) {
+    const col = typeof color === "string" ? parseColor(color) : color;
+    this.scene.strokeColor(this.id, col, duration);
+    return this;
+  }
+  fill(color, duration = 0) {
+    if (color === null) {
+      this.scene.fillColor(this.id, null, duration);
+    } else {
+      const col = typeof color === "string" ? parseColor(color) : color;
+      this.scene.fillColor(this.id, col, duration);
+    }
+    return this;
+  }
+  opacity(value, duration = 0) {
+    this.scene.opacity(this.id, value, duration);
+    return this;
+  }
+  lineDash(dashArray, duration = 0) {
+    this.scene.lineDash(this.id, dashArray, duration);
+    return this;
+  }
+  lineCap(cap, duration = 0) {
+    this.scene.lineCap(this.id, cap, duration);
+    return this;
+  }
+  lineJoin(join, duration = 0) {
+    this.scene.lineJoin(this.id, join, duration);
+    return this;
+  }
+  vertexColors(colors, duration = 0) {
+    if (colors === null) {
+      this.scene.vertexColors(this.id, null, duration);
+    } else {
+      const cols = colors.map((c) => typeof c === "string" ? parseColor(c) : c);
+      this.scene.vertexColors(this.id, cols, duration);
+    }
+    return this;
+  }
   reveal(duration = ANIMATION_DURATION) {
     this.scene.reveal(this.id, duration);
     return this;
@@ -607,6 +785,44 @@ class ShapeRef {
   remove() {
     this.scene.remove(this.id);
   }
+}
+function parseColor(str) {
+  str = str.trim().toLowerCase();
+  if (str.startsWith("#")) {
+    const hex = str.slice(1);
+    let r, g, b, a = 1;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 4) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+      a = parseInt(hex[3] + hex[3], 16) / 255;
+    } else if (hex.length === 6) {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    } else if (hex.length === 8) {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+      a = parseInt(hex.slice(6, 8), 16) / 255;
+    } else {
+      throw new Error(`Invalid hex color: ${str}`);
+    }
+    return new Color(r, g, b, a);
+  }
+  const rgbMatch = str.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+  if (rgbMatch) {
+    return new Color(parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3]));
+  }
+  const rgbaMatch = str.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\s*\)$/);
+  if (rgbaMatch) {
+    return new Color(parseInt(rgbaMatch[1]), parseInt(rgbaMatch[2]), parseInt(rgbaMatch[3]), parseFloat(rgbaMatch[4]));
+  }
+  throw new Error(`Unsupported color string: ${str}`);
 }
 
 class Scene {
@@ -622,6 +838,13 @@ class Scene {
   totalPausedTime = 0;
   getShape(id) {
     return this.shapes.get(id);
+  }
+  invalidateAllTransforms() {
+    for (const shape of this.shapes.values()) {
+      if (shape instanceof BaseShape) {
+        shape.invalidateTransformCache();
+      }
+    }
   }
   F(fun) {
     const id = this.nextId++;
@@ -678,7 +901,7 @@ class Scene {
     if (duration > 0) {
       shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now() - this.totalPausedTime);
     } else {
-      shape.setTranslation(new Vec2({ x, y }));
+      shape.translation = new Vec2({ x, y });
       shape.animations.translation = null;
     }
   }
@@ -689,7 +912,7 @@ class Scene {
     if (duration > 0) {
       shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now() - this.totalPausedTime);
     } else {
-      shape.setScale(new Vec2({ x: sx, y: sy }));
+      shape.scale = new Vec2({ x: sx, y: sy });
       shape.animations.scale = null;
     }
   }
@@ -700,9 +923,66 @@ class Scene {
     if (duration > 0) {
       shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, performance.now() - this.totalPausedTime);
     } else {
-      shape.setRotation(angle);
+      shape.rotation = angle;
       shape.animations.rotation = null;
     }
+  }
+  strokeColor(id, color, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    if (duration > 0) {
+      shape.animations.strokeColor = new PropertyAnimation(shape.strokeColor, color, duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.strokeColor = color;
+      shape.animations.strokeColor = null;
+    }
+  }
+  fillColor(id, color, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    if (duration > 0 && color !== null) {
+      shape.animations.fillColor = new PropertyAnimation(shape.fillColor || new Color(0, 0, 0, 0), color, duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.fillColor = color;
+      shape.animations.fillColor = null;
+    }
+  }
+  opacity(id, value, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    if (duration > 0) {
+      shape.animations.opacity = new PropertyAnimation(shape.opacity, value, duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.opacity = value;
+      shape.animations.opacity = null;
+    }
+  }
+  lineDash(id, dashArray, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    shape.lineDash = dashArray;
+  }
+  lineCap(id, cap, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    shape.lineCap = cap;
+  }
+  lineJoin(id, join, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    shape.lineJoin = join;
+  }
+  vertexColors(id, colors, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
+      return;
+    shape.setVertexColors(colors);
   }
   morph(id1, id2, duration = ANIMATION_DURATION) {
     if (!this.shapes.has(id1) || !this.shapes.has(id2)) {
@@ -727,9 +1007,9 @@ class Scene {
   remove(id) {
     this.shapes.delete(id);
   }
-  wait(ms) {
+  wait(seconds) {
     this.pauseStart = performance.now();
-    this.pauseDuration = ms;
+    this.pauseDuration = seconds * 1000;
     return this;
   }
   startRecording(options = {}) {
@@ -796,15 +1076,18 @@ class Scene {
             if (shape.animationStart !== null) {
               shape.animationStart += actualPause;
             }
-            if (shape.animations.translation) {
+            if (shape.animations.translation)
               shape.animations.translation.startTime += actualPause;
-            }
-            if (shape.animations.scale) {
+            if (shape.animations.scale)
               shape.animations.scale.startTime += actualPause;
-            }
-            if (shape.animations.rotation) {
+            if (shape.animations.rotation)
               shape.animations.rotation.startTime += actualPause;
-            }
+            if (shape.animations.strokeColor)
+              shape.animations.strokeColor.startTime += actualPause;
+            if (shape.animations.fillColor)
+              shape.animations.fillColor.startTime += actualPause;
+            if (shape.animations.opacity)
+              shape.animations.opacity.startTime += actualPause;
           } else if (shape instanceof MorphShape) {
             shape.animationStart += actualPause;
           }
@@ -850,14 +1133,14 @@ class Scene {
   }
 }
 var scene = new Scene;
+window.scene = scene;
 function animate() {
   scene.animate(performance.now());
   requestAnimationFrame(animate);
 }
 function main() {
-  gridLevel = 3;
+  setGridLevel(3);
   resize();
   requestAnimationFrame(animate);
 }
 main();
-window.scene = scene;
