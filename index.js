@@ -377,36 +377,36 @@ class SpiralShape extends BaseShape {
 
 // ----- MorphShape: interpolates between two shapes over time -----
 class MorphShape extends Drawable {
-  constructor(idx1, idx2, duration = ANIMATION_DURATION) {
+  constructor(shapesArray, idx1, idx2, duration = ANIMATION_DURATION) {
     super();
-    this.idx1 = idx1;               // index of first shape
-    this.idx2 = idx2;               // index of second shape (target)
+    this.shapes = shapesArray;       // reference to the scene's shapes array
+    this.idx1 = idx1;
+    this.idx2 = idx2;
     this.duration = duration;
-    this.pointSize = 2;              // could be averaged, but kept constant
+    this.pointSize = 2;
     this.animationStart = performance.now();
-    // No finished flag – we'll use active to control visibility
   }
 
   draw() {
-    if (!this.active) return; // skip if inactive
+    if (!this.active) return;
 
-    const shape1 = shapes[this.idx1];
-    const shape2 = shapes[this.idx2];
-    if (!shape1 || !shape2) return; // shapes might have been removed (but we never remove, so shouldn't happen)
+    const shape1 = this.shapes[this.idx1];
+    const shape2 = this.shapes[this.idx2];
+    if (!shape1 || !shape2) return;
 
     const now = performance.now();
     const elapsed = now - this.animationStart;
     const t = Math.min(elapsed / this.duration, 1);
 
-    // Interpolate transforms and colors directly from current shape properties
+    // Interpolate transforms and colors
     const trans = shape1.translation.lerp(shape2.translation, t);
     const scale = shape1.scale.lerp(shape2.scale, t);
     const rot = lerp(shape1.rotation, shape2.rotation, t);
     const color = shape1.color.lerp(shape2.color, t);
     const colorStr = color.toString();
 
-    // Interpolate vertices (base vertices are static)
-    const count = shape1.vertices.length; // same as shape2
+    // Interpolate vertices
+    const count = shape1.vertices.length;
     const transformed = [];
     for (let i = 0; i < count; i++) {
       const v = shape1.vertices[i].lerp(shape2.vertices[i], t);
@@ -415,7 +415,7 @@ class MorphShape extends Drawable {
       transformed.push(rotated.add(trans));
     }
 
-    // Draw lines between consecutive transformed vertices
+    // Draw lines
     for (let i = 0; i < count - 1; i++) {
       transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
     }
@@ -425,19 +425,15 @@ class MorphShape extends Drawable {
 
     // Deactivate when animation completes, unless target shape hasn't started drawing
     if (elapsed >= this.duration) {
-      const target = shapes[this.idx2];
-      // Keep active if target progress is still 0 (target hasn't started drawing)
+      const target = this.shapes[this.idx2];
       if (target && target.progress === 0) {
-        // remain active (we'll keep drawing the final state)
+        // remain active (keep drawing final state)
       } else {
-        this.active = false; // hide when done and target has started
+        this.active = false;
       }
     }
   }
 }
-
-// Global collection of shapes
-let shapes = [];
 
 // ----- Canvas sizing -----
 function boxSize() {
@@ -530,176 +526,237 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories -----
-function F(fun) {
-  const shape = new FShape(fun);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function Circle(radius) {
-  const shape = new CircleShape(radius);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function Square(sideLength) {
-  const shape = new SquareShape(sideLength);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function RegularPolygon(radius, sides) {
-  const shape = new RegularPolygonShape(radius, sides);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function Line(startX, startY, endX, endY) {
-  const shape = new LineShape({ x: startX, y: startY }, { x: endX, y: endY });
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function ParametricCurve(fx, fy, tMin = 0, tMax = 1) {
-  const shape = new ParametricCurveShape(fx, fy, tMin, tMax);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function Star(outerRadius, innerRadius, points = 5) {
-  const shape = new StarShape(outerRadius, innerRadius, points);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-function Spiral(maxRadius, turns = 3) {
-  const shape = new SpiralShape(maxRadius, turns);
-  shapes.push(shape);
-  return shapes.length - 1;
-}
-
-// ----- Shape Actions (now with optional animation duration) -----
-
-// Set absolute translation (animated if duration > 0)
-function Translate(idx, x, y, duration = 0) {
-  const shape = shapes[idx];
-  if (!shape) return idx;
-  if (duration > 0) {
-    // Start animation from current value
-    shape.animations.translation = new Animation(
-      shape.translation,
-      new Vec2({ x, y }),
-      duration,
-      performance.now()
-    );
-  } else {
-    shape.translation = new Vec2({ x, y });
-    shape.animations.translation = null; // cancel any ongoing animation
+// ==================== SHAPE REFERENCE FOR CHAINING ====================
+class ShapeRef {
+  constructor(scene, index) {
+    this.scene = scene;
+    this.index = index;
   }
-  return idx;
+
+  // Translation with optional duration (ms)
+  translate(x, y, duration = 0) {
+    this.scene.translate(this.index, x, y, duration);
+    return this;
+  }
+
+  // Scale with optional duration
+  scale(sx, sy = sx, duration = 0) {
+    this.scene.scale(this.index, sx, sy, duration);
+    return this;
+  }
+
+  // Rotate (radians) with optional duration
+  rotate(angle, duration = 0) {
+    this.scene.rotate(this.index, angle, duration);
+    return this;
+  }
+
+  // Start the segment‑reveal animation
+  reveal() {
+    this.scene.reveal(this.index);
+    return this;
+  }
+
+  // Morph this shape into another shape (returns a new ShapeRef for the morph)
+  morph(otherRef, duration = ANIMATION_DURATION) {
+    const morphIndex = this.scene.morph(this.index, otherRef.index, duration);
+    return new ShapeRef(this.scene, morphIndex);
+  }
+
+  // Remove (deactivate) this shape
+  remove() {
+    this.scene.remove(this.index);
+    // No return – the shape is gone, so chaining stops.
+  }
 }
 
-// Set absolute scale (uniform or separate x,y) – animated if duration > 0
-function Scale(idx, sx, sy = sx, duration = 0) {
-  const shape = shapes[idx];
-  if (!shape) return idx;
-  if (duration > 0) {
-    shape.animations.scale = new Animation(
-      shape.scale,
-      new Vec2({ x: sx, y: sy }),
-      duration,
-      performance.now()
-    );
-  } else {
-    shape.scale = new Vec2({ x: sx, y: sy });
-    shape.animations.scale = null;
+// ==================== SCENE CLASS ====================
+class Scene {
+  constructor() {
+    this.shapes = [];          // all drawable objects in this scene
   }
-  return idx;
-}
 
-// Set absolute rotation (in radians) – animated if duration > 0
-function Rotate(idx, angle, duration = 0) {
-  const shape = shapes[idx];
-  if (!shape) return idx;
-  if (duration > 0) {
-    shape.animations.rotation = new Animation(
-      shape.rotation,
-      angle,
-      duration,
-      performance.now()
-    );
-  } else {
-    shape.rotation = angle;
-    shape.animations.rotation = null;
+  // ----- Shape factories (return ShapeRef) -----
+  F(fun) {
+    const shape = new FShape(fun);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
   }
-  return idx;
-}
 
-// ----- Morph: create a shape that interpolates between two shapes -----
-function Morph(idx1, idx2, duration = ANIMATION_DURATION) {
-  if (!shapes[idx1] || !shapes[idx2]) {
-    throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
+  Circle(radius) {
+    const shape = new CircleShape(radius);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
   }
-  const morph = new MorphShape(idx1, idx2, duration);
-  shapes.push(morph);
-  return shapes.length - 1;
-}
 
-// ----- Animation control for regular shapes (segment reveal) -----
-function draw(index) {
-  const shape = shapes[index];
-  if (!shape) {
-    throw new Error(`Shape with index ${index} does not exist.`);
+  Square(sideLength) {
+    const shape = new SquareShape(sideLength);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
   }
-  // Only regular shapes (subclasses of BaseShape) have progress animation.
-  if (shape instanceof BaseShape) {
-    shape.animationStart = performance.now();
-    shape.progress = 0;
+
+  RegularPolygon(radius, sides) {
+    const shape = new RegularPolygonShape(radius, sides);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
   }
-  return index;
-}
 
-// ----- Animation loop -----
-function animate() {
-  const now = performance.now();
+  Line(startX, startY, endX, endY) {
+    const shape = new LineShape({ x: startX, y: startY }, { x: endX, y: endY });
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
+  }
 
-  // Update progress and animations for regular shapes (BaseShape instances)
-  for (const shape of shapes) {
-    if (shape instanceof BaseShape && shape.active) {
-      // Update drawing progress
-      if (shape.animationStart !== null) {
-        const elapsed = now - shape.animationStart;
-        const t = Math.min(elapsed, ANIMATION_DURATION);
-        const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
-        shape.progress = Math.min(targetProgress, shape.vertices.length);
+  ParametricCurve(fx, fy, tMin = 0, tMax = 1) {
+    const shape = new ParametricCurveShape(fx, fy, tMin, tMax);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
+  }
 
-        if (elapsed >= ANIMATION_DURATION) {
-          shape.animationStart = null;
+  Star(outerRadius, innerRadius, points = 5) {
+    const shape = new StarShape(outerRadius, innerRadius, points);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
+  }
+
+  Spiral(maxRadius, turns = 3) {
+    const shape = new SpiralShape(maxRadius, turns);
+    this.shapes.push(shape);
+    return new ShapeRef(this, this.shapes.length - 1);
+  }
+
+  // ----- Transformations (low‑level, used by ShapeRef) -----
+  translate(idx, x, y, duration = 0) {
+    const shape = this.shapes[idx];
+    if (!shape) return;
+    if (duration > 0) {
+      shape.animations.translation = new Animation(
+        shape.translation,
+        new Vec2({ x, y }),
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.translation = new Vec2({ x, y });
+      shape.animations.translation = null;
+    }
+  }
+
+  scale(idx, sx, sy = sx, duration = 0) {
+    const shape = this.shapes[idx];
+    if (!shape) return;
+    if (duration > 0) {
+      shape.animations.scale = new Animation(
+        shape.scale,
+        new Vec2({ x: sx, y: sy }),
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.scale = new Vec2({ x: sx, y: sy });
+      shape.animations.scale = null;
+    }
+  }
+
+  rotate(idx, angle, duration = 0) {
+    const shape = this.shapes[idx];
+    if (!shape) return;
+    if (duration > 0) {
+      shape.animations.rotation = new Animation(
+        shape.rotation,
+        angle,
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.rotation = angle;
+      shape.animations.rotation = null;
+    }
+  }
+
+  // ----- Morph between two shapes (returns index of morph) -----
+  morph(idx1, idx2, duration = ANIMATION_DURATION) {
+    if (!this.shapes[idx1] || !this.shapes[idx2]) {
+      throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
+    }
+    const morph = new MorphShape(this.shapes, idx1, idx2, duration);
+    this.shapes.push(morph);
+    return this.shapes.length - 1;
+  }
+
+  // ----- Start segment reveal animation for a shape -----
+  reveal(idx) {
+    const shape = this.shapes[idx];
+    if (!shape) {
+      throw new Error(`Shape with index ${idx} does not exist.`);
+    }
+    if (shape instanceof BaseShape) {
+      shape.animationStart = performance.now();
+      shape.progress = 0;
+    }
+  }
+
+  // ----- Remove (deactivate) a shape by index -----
+  remove(idx) {
+    if (idx >= 0 && idx < this.shapes.length) {
+      this.shapes[idx].active = false; // just deactivate, keep index stable
+    }
+  }
+
+  // ----- Update all shapes (progress & animations) -----
+  update(now) {
+    for (const shape of this.shapes) {
+      if (shape instanceof BaseShape && shape.active) {
+        // Update drawing progress
+        if (shape.animationStart !== null) {
+          const elapsed = now - shape.animationStart;
+          const t = Math.min(elapsed, ANIMATION_DURATION);
+          const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
+          shape.progress = Math.min(targetProgress, shape.vertices.length);
+
+          if (elapsed >= ANIMATION_DURATION) {
+            shape.animationStart = null;
+          }
         }
+        // Update transformation animations
+        shape.updateAnimations(now);
       }
-      // Update transformation animations
-      shape.updateAnimations(now);
     }
   }
 
-  clearBackground();
-  drawGrid();
+  // ----- Draw everything in the scene -----
+  draw() {
+    clearBackground();
+    drawGrid();
 
-  for (const shape of shapes) {
-    if (shape.active) {
-      shape.draw();
+    for (const shape of this.shapes) {
+      if (shape.active) {
+        shape.draw();
+      }
     }
   }
 
+  // ----- Animation loop entry point -----
+  animate(now) {
+    this.update(now);
+    this.draw();
+  }
+}
+
+// ==================== GLOBAL SETUP ====================
+// Create a default scene (you can also create multiple scenes)
+const scene = new Scene();
+
+// Animation loop
+function animate() {
+  scene.animate(performance.now());
   requestAnimationFrame(animate);
 }
 
-requestAnimationFrame(animate);
-
-// ----- Initialisation -----
+// Initialisation
 function main() {
   gridLevel = 3;
   resize();
+  requestAnimationFrame(animate);
 }
 main();
