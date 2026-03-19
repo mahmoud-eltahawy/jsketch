@@ -1,5 +1,9 @@
 // index.ts – compiled to index.js by bun
 // A 2D animation framework with grid, shapes, and recording.
+// Fixed: resize crash, morph zombie, pause handling, animations during pause,
+// division by zero, gridLevel validation, and more.
+// Added: TextShape, ImageShape, QuadraticBezierShape, CubicBezierShape,
+// ArcShape, EllipseShape.
 
 // ----- Linear interpolation -----
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -456,7 +460,7 @@ abstract class BaseShape extends Drawable {
   }
 }
 
-// ----- Specific shape classes (unchanged except constructor signatures) -----
+// ----- Existing shape classes (FShape, CircleShape, etc.) -----
 class FShape extends BaseShape {
   constructor(id: number, fun: (x: number) => number) {
     const vertices: Vec2[] = [];
@@ -588,6 +592,342 @@ class SpiralShape extends BaseShape {
       vertices.push(new Vec2({ x, y }));
     }
     super(id, vertices, 2, false);
+  }
+}
+
+// ----- NEW SHAPE PRIMITIVES -----
+
+// Quadratic Bezier shape (sampled)
+class QuadraticBezierShape extends BaseShape {
+  constructor(id: number, p0: Vec2Params, p1: Vec2Params, p2: Vec2Params) {
+    const vertices: Vec2[] = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1);
+      const x = (1-t)*(1-t)*p0.x + 2*(1-t)*t*p1.x + t*t*p2.x;
+      const y = (1-t)*(1-t)*p0.y + 2*(1-t)*t*p1.y + t*t*p2.y;
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(id, vertices, 2, false);
+  }
+}
+
+// Cubic Bezier shape (sampled)
+class CubicBezierShape extends BaseShape {
+  constructor(id: number, p0: Vec2Params, p1: Vec2Params, p2: Vec2Params, p3: Vec2Params) {
+    const vertices: Vec2[] = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1);
+      const x = (1-t)*(1-t)*(1-t)*p0.x + 3*(1-t)*(1-t)*t*p1.x + 3*(1-t)*t*t*p2.x + t*t*t*p3.x;
+      const y = (1-t)*(1-t)*(1-t)*p0.y + 3*(1-t)*(1-t)*t*p1.y + 3*(1-t)*t*t*p2.y + t*t*t*p3.y;
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(id, vertices, 2, false);
+  }
+}
+
+// Arc shape (sampled, open)
+class ArcShape extends BaseShape {
+  constructor(id: number, center: Vec2Params, radius: number, startAngle: number, endAngle: number, anticlockwise = false) {
+    const vertices: Vec2[] = [];
+    const angleRange = anticlockwise ? startAngle - endAngle : endAngle - startAngle;
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1);
+      const angle = startAngle + t * angleRange;
+      const x = center.x + radius * Math.cos(angle);
+      const y = center.y + radius * Math.sin(angle);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(id, vertices, 2, false);
+  }
+}
+
+// Ellipse shape (sampled, may be closed or open)
+class EllipseShape extends BaseShape {
+  constructor(id: number, center: Vec2Params, radiusX: number, radiusY: number, rotation: number, startAngle: number, endAngle: number, anticlockwise = false) {
+    const vertices: Vec2[] = [];
+    const angleRange = anticlockwise ? startAngle - endAngle : endAngle - startAngle;
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1);
+      const angle = startAngle + t * angleRange;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const x = center.x + radiusX * cos * Math.cos(rotation) - radiusY * sin * Math.sin(rotation);
+      const y = center.y + radiusX * cos * Math.sin(rotation) + radiusY * sin * Math.cos(rotation);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(id, vertices, 2, false);
+  }
+}
+
+// Text shape (uses canvas text rendering with transforms)
+class TextShape extends Drawable {
+  private _text: string;
+  private _font: string;
+  strokeColor: Color;
+  fillColor: Color | null;
+  opacity: number;
+  lineWidth: number;
+  lineDash: number[];
+  lineCap: CanvasLineCap;
+  lineJoin: CanvasLineJoin;
+
+  // Transform properties
+  private _translation: Vec2;
+  private _scale: Vec2;
+  private _rotation: number;
+
+  // Animation support
+  animations: {
+    translation: PropertyAnimation<Vec2> | null;
+    scale: PropertyAnimation<Vec2> | null;
+    rotation: PropertyAnimation<number> | null;
+    strokeColor: PropertyAnimation<Color> | null;
+    fillColor: PropertyAnimation<Color> | null;
+    opacity: PropertyAnimation<number> | null;
+  };
+
+  constructor(
+    id: number,
+    text: string,
+    font = '14px sans-serif',
+    translation: Vec2Params = { x: 0, y: 0 },
+    scale: Vec2Params = { x: 1, y: 1 },
+    rotation = 0
+  ) {
+    super(id);
+    this._text = text;
+    this._font = font;
+    this.strokeColor = Color.random();
+    this.fillColor = null;
+    this.opacity = 1.0;
+    this.lineWidth = 1;
+    this.lineDash = [];
+    this.lineCap = 'butt';
+    this.lineJoin = 'miter';
+    this._translation = new Vec2(translation);
+    this._scale = new Vec2(scale);
+    this._rotation = rotation;
+    this.animations = {
+      translation: null,
+      scale: null,
+      rotation: null,
+      strokeColor: null,
+      fillColor: null,
+      opacity: null,
+    };
+  }
+
+  get text(): string { return this._text; }
+  set text(t: string) { this._text = t; }
+
+  get font(): string { return this._font; }
+  set font(f: string) { this._font = f; }
+
+  get translation(): Vec2 { return this._translation; }
+  set translation(t: Vec2) { this._translation = t; }
+
+  get scale(): Vec2 { return this._scale; }
+  set scale(s: Vec2) { this._scale = s; }
+
+  get rotation(): number { return this._rotation; }
+  set rotation(r: number) { this._rotation = r; }
+
+  // Update animations (called by scene)
+  update(now: number): void {
+    if (this.animations.translation) {
+      const anim = this.animations.translation;
+      if (anim.isFinished(now)) {
+        this.translation = anim.target;
+        this.animations.translation = null;
+      } else {
+        this.translation = anim.value(now);
+      }
+    }
+    if (this.animations.scale) {
+      const anim = this.animations.scale;
+      if (anim.isFinished(now)) {
+        this.scale = anim.target;
+        this.animations.scale = null;
+      } else {
+        this.scale = anim.value(now);
+      }
+    }
+    if (this.animations.rotation) {
+      const anim = this.animations.rotation;
+      if (anim.isFinished(now)) {
+        this.rotation = anim.target;
+        this.animations.rotation = null;
+      } else {
+        this.rotation = anim.value(now);
+      }
+    }
+    if (this.animations.strokeColor) {
+      const anim = this.animations.strokeColor;
+      if (anim.isFinished(now)) {
+        this.strokeColor = anim.target;
+        this.animations.strokeColor = null;
+      } else {
+        this.strokeColor = anim.value(now);
+      }
+    }
+    if (this.animations.fillColor) {
+      const anim = this.animations.fillColor;
+      if (anim.isFinished(now)) {
+        this.fillColor = anim.target;
+        this.animations.fillColor = null;
+      } else {
+        this.fillColor = anim.value(now);
+      }
+    }
+    if (this.animations.opacity) {
+      const anim = this.animations.opacity;
+      if (anim.isFinished(now)) {
+        this.opacity = anim.target;
+        this.animations.opacity = null;
+      } else {
+        this.opacity = anim.value(now);
+      }
+    }
+  }
+
+  draw(): void {
+    if (!this.active) return;
+
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.font = this._font;
+    ctx.lineWidth = this.lineWidth;
+    ctx.setLineDash(this.lineDash);
+    ctx.lineCap = this.lineCap;
+    ctx.lineJoin = this.lineJoin;
+
+    // Apply transformations
+    const half = boxSize() / 2;
+    const screenPos = this.translation.normalized();
+    ctx.translate(screenPos.x, screenPos.y);
+    ctx.rotate(this.rotation);
+    ctx.scale(this.scale.x, this.scale.y);
+
+    if (this.fillColor) {
+      ctx.fillStyle = this.fillColor.toString();
+      ctx.fillText(this._text, 0, 0);
+    }
+    if (this.strokeColor) {
+      ctx.strokeStyle = this.strokeColor.toString();
+      ctx.strokeText(this._text, 0, 0);
+    }
+
+    ctx.restore();
+  }
+}
+
+// Image shape (uses canvas drawImage with transforms)
+class ImageShape extends Drawable {
+  private _image: HTMLImageElement | ImageBitmap;
+  strokeColor?: Color; // not used for images, but kept for consistency
+  fillColor?: Color;
+  opacity: number;
+  lineWidth?: number;
+
+  private _translation: Vec2;
+  private _scale: Vec2;
+  private _rotation: number;
+
+  animations: {
+    translation: PropertyAnimation<Vec2> | null;
+    scale: PropertyAnimation<Vec2> | null;
+    rotation: PropertyAnimation<number> | null;
+    opacity: PropertyAnimation<number> | null;
+  };
+
+  constructor(
+    id: number,
+    image: HTMLImageElement | ImageBitmap,
+    translation: Vec2Params = { x: 0, y: 0 },
+    scale: Vec2Params = { x: 1, y: 1 },
+    rotation = 0
+  ) {
+    super(id);
+    this._image = image;
+    this.opacity = 1.0;
+    this._translation = new Vec2(translation);
+    this._scale = new Vec2(scale);
+    this._rotation = rotation;
+    this.animations = {
+      translation: null,
+      scale: null,
+      rotation: null,
+      opacity: null,
+    };
+  }
+
+  get image(): HTMLImageElement | ImageBitmap { return this._image; }
+  set image(img: HTMLImageElement | ImageBitmap) { this._image = img; }
+
+  get translation(): Vec2 { return this._translation; }
+  set translation(t: Vec2) { this._translation = t; }
+
+  get scale(): Vec2 { return this._scale; }
+  set scale(s: Vec2) { this._scale = s; }
+
+  get rotation(): number { return this._rotation; }
+  set rotation(r: number) { this._rotation = r; }
+
+  update(now: number): void {
+    if (this.animations.translation) {
+      const anim = this.animations.translation;
+      if (anim.isFinished(now)) {
+        this.translation = anim.target;
+        this.animations.translation = null;
+      } else {
+        this.translation = anim.value(now);
+      }
+    }
+    if (this.animations.scale) {
+      const anim = this.animations.scale;
+      if (anim.isFinished(now)) {
+        this.scale = anim.target;
+        this.animations.scale = null;
+      } else {
+        this.scale = anim.value(now);
+      }
+    }
+    if (this.animations.rotation) {
+      const anim = this.animations.rotation;
+      if (anim.isFinished(now)) {
+        this.rotation = anim.target;
+        this.animations.rotation = null;
+      } else {
+        this.rotation = anim.value(now);
+      }
+    }
+    if (this.animations.opacity) {
+      const anim = this.animations.opacity;
+      if (anim.isFinished(now)) {
+        this.opacity = anim.target;
+        this.animations.opacity = null;
+      } else {
+        this.opacity = anim.value(now);
+      }
+    }
+  }
+
+  draw(): void {
+    if (!this.active) return;
+
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+
+    const half = boxSize() / 2;
+    const screenPos = this.translation.normalized();
+    ctx.translate(screenPos.x, screenPos.y);
+    ctx.rotate(this.rotation);
+    ctx.scale(this.scale.x, this.scale.y);
+
+    // Draw image centered at (0,0) in transformed space
+    ctx.drawImage(this._image, -this._image.width/2, -this._image.height/2);
+
+    ctx.restore();
   }
 }
 
@@ -913,7 +1253,6 @@ class ShapeRef {
   }
 
   lineDash(dashArray: number[], _duration = 0): this {
-    // duration ignored – set immediately
     this.scene.lineDash(this.id, dashArray);
     return this;
   }
@@ -950,6 +1289,12 @@ class ShapeRef {
 
   remove(): void {
     this.scene.remove(this.id);
+  }
+
+  // TextShape specific
+  font(fontString: string): this {
+    this.scene.font(this.id, fontString);
+    return this;
   }
 }
 
@@ -1047,7 +1392,7 @@ class Scene {
     }
   }
 
-  // ----- Shape factories -----
+  // ----- Existing shape factories -----
   F(fun: (x: number) => number): ShapeRef {
     const id = this.nextId++;
     const shape = new FShape(id, fun);
@@ -1104,126 +1449,207 @@ class Scene {
     return new ShapeRef(this, id);
   }
 
+  // ----- NEW shape factories -----
+  QuadraticBezier(p0: Vec2Params, p1: Vec2Params, p2: Vec2Params): ShapeRef {
+    const id = this.nextId++;
+    const shape = new QuadraticBezierShape(id, p0, p1, p2);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
+  CubicBezier(p0: Vec2Params, p1: Vec2Params, p2: Vec2Params, p3: Vec2Params): ShapeRef {
+    const id = this.nextId++;
+    const shape = new CubicBezierShape(id, p0, p1, p2, p3);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
+  Arc(center: Vec2Params, radius: number, startAngle: number, endAngle: number, anticlockwise = false): ShapeRef {
+    const id = this.nextId++;
+    const shape = new ArcShape(id, center, radius, startAngle, endAngle, anticlockwise);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
+  Ellipse(center: Vec2Params, radiusX: number, radiusY: number, rotation: number, startAngle: number, endAngle: number, anticlockwise = false): ShapeRef {
+    const id = this.nextId++;
+    const shape = new EllipseShape(id, center, radiusX, radiusY, rotation, startAngle, endAngle, anticlockwise);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
+  Text(text: string, font = '14px sans-serif', translation: Vec2Params = { x: 0, y: 0 }): ShapeRef {
+    const id = this.nextId++;
+    const shape = new TextShape(id, text, font, translation);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
+  Image(image: HTMLImageElement | ImageBitmap, translation: Vec2Params = { x: 0, y: 0 }): ShapeRef {
+    const id = this.nextId++;
+    const shape = new ImageShape(id, image, translation);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
+  }
+
   // ----- Transformations (duration in ms) -----
   translate(id: number, x: number, y: number, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0) {
-      shape.animations.translation = new PropertyAnimation<Vec2>(
-        shape.translation,
-        new Vec2({ x, y }),
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.translation = new Vec2({ x, y });
-      shape.animations.translation = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape || shape instanceof ImageShape) {
+      if (duration > 0) {
+        shape.animations.translation = new PropertyAnimation<Vec2>(
+          shape.translation,
+          new Vec2({ x, y }),
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.translation = new Vec2({ x, y });
+        shape.animations.translation = null;
+      }
     }
   }
 
   scale(id: number, sx: number, sy: number = sx, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0) {
-      shape.animations.scale = new PropertyAnimation<Vec2>(
-        shape.scale,
-        new Vec2({ x: sx, y: sy }),
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.scale = new Vec2({ x: sx, y: sy });
-      shape.animations.scale = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape || shape instanceof ImageShape) {
+      if (duration > 0) {
+        shape.animations.scale = new PropertyAnimation<Vec2>(
+          shape.scale,
+          new Vec2({ x: sx, y: sy }),
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.scale = new Vec2({ x: sx, y: sy });
+        shape.animations.scale = null;
+      }
     }
   }
 
   rotate(id: number, angle: number, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0) {
-      shape.animations.rotation = new PropertyAnimation<number>(
-        shape.rotation,
-        angle,
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.rotation = angle;
-      shape.animations.rotation = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape || shape instanceof ImageShape) {
+      if (duration > 0) {
+        shape.animations.rotation = new PropertyAnimation<number>(
+          shape.rotation,
+          angle,
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.rotation = angle;
+        shape.animations.rotation = null;
+      }
     }
   }
 
   // ----- Styling setters -----
   strokeColor(id: number, color: Color, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0) {
-      shape.animations.strokeColor = new PropertyAnimation<Color>(
-        shape.strokeColor,
-        color,
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.strokeColor = color;
-      shape.animations.strokeColor = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape) {
+      if (duration > 0) {
+        shape.animations.strokeColor = new PropertyAnimation<Color>(
+          shape.strokeColor,
+          color,
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.strokeColor = color;
+        shape.animations.strokeColor = null;
+      }
     }
   }
 
   fillColor(id: number, color: Color | null, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0 && color !== null) {
-      shape.animations.fillColor = new PropertyAnimation<Color>(
-        shape.fillColor || new Color(0,0,0,0),
-        color,
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.fillColor = color;
-      shape.animations.fillColor = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape) {
+      if (duration > 0 && color !== null) {
+        shape.animations.fillColor = new PropertyAnimation<Color>(
+          shape.fillColor || new Color(0,0,0,0),
+          color,
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.fillColor = color;
+        shape.animations.fillColor = null;
+      }
     }
   }
 
   opacity(id: number, value: number, duration = 0): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    if (duration > 0) {
-      shape.animations.opacity = new PropertyAnimation<number>(
-        shape.opacity,
-        value,
-        duration,
-        this.currentEffectiveTime()
-      );
-    } else {
-      shape.opacity = value;
-      shape.animations.opacity = null;
+    if (!shape) return;
+    const effectiveNow = this.currentEffectiveTime();
+
+    if (shape instanceof BaseShape || shape instanceof TextShape || shape instanceof ImageShape) {
+      if (duration > 0) {
+        shape.animations.opacity = new PropertyAnimation<number>(
+          shape.opacity,
+          value,
+          duration,
+          effectiveNow
+        );
+      } else {
+        shape.opacity = value;
+        shape.animations.opacity = null;
+      }
     }
   }
 
   lineDash(id: number, dashArray: number[]): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    shape.lineDash = dashArray;
+    if (!shape) return;
+    if (shape instanceof BaseShape || shape instanceof TextShape) {
+      shape.lineDash = dashArray;
+    }
   }
 
   lineCap(id: number, cap: CanvasLineCap): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    shape.lineCap = cap;
+    if (!shape) return;
+    if (shape instanceof BaseShape || shape instanceof TextShape) {
+      shape.lineCap = cap;
+    }
   }
 
   lineJoin(id: number, join: CanvasLineJoin): void {
     const shape = this.shapes.get(id);
-    if (!shape || !(shape instanceof BaseShape)) return;
-    shape.lineJoin = join;
+    if (!shape) return;
+    if (shape instanceof BaseShape || shape instanceof TextShape) {
+      shape.lineJoin = join;
+    }
   }
 
   vertexColors(id: number, colors: Color[] | null): void {
     const shape = this.shapes.get(id);
     if (!shape || !(shape instanceof BaseShape)) return;
     shape.setVertexColors(colors);
+  }
+
+  // TextShape specific
+  font(id: number, fontString: string): void {
+    const shape = this.shapes.get(id);
+    if (shape instanceof TextShape) {
+      shape.font = fontString;
+    }
   }
 
   // ----- Morph -----
@@ -1362,12 +1788,12 @@ class Scene {
 
     const effectiveNow = now - this.totalPausedTime;
 
-    // First, update all shapes (including MorphShape)
+    // First, update all shapes (including MorphShape, TextShape, ImageShape)
     for (const shape of this.shapes.values()) {
       shape.update(effectiveNow);
     }
 
-    // Then, handle reveal progress and animations for BaseShape
+    // Then, handle reveal progress for BaseShape (since reveal uses progress)
     for (const shape of this.shapes.values()) {
       if (shape instanceof BaseShape && shape.active) {
         if (shape.animationStart !== null) {
