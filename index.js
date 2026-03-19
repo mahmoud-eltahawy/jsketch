@@ -115,8 +115,21 @@ class Vec2 {
   }
 }
 
-// ----- Shape class with translation, scale, and rotation support -----
-class Shape {
+// ----- Abstract base class for all drawable objects -----
+class Drawable {
+  constructor() {
+    if (this.constructor === Drawable) {
+      throw new Error("Drawable is an abstract class and cannot be instantiated directly.");
+    }
+  }
+
+  draw() {
+    throw new Error("draw() method must be implemented by subclass.");
+  }
+}
+
+// ----- Base class for all shapes (common properties and drawing logic) -----
+class BaseShape extends Drawable {
   constructor(
     vertices,
     pointSize = 2,
@@ -125,6 +138,7 @@ class Shape {
     scale = { x: 1, y: 1 },
     rotation = 0  // in radians
   ) {
+    super();
     this.vertices = vertices;                 // array of Vec2 (relative coordinates)
     this.color = Color.random();
     this.pointSize = pointSize;
@@ -161,9 +175,65 @@ class Shape {
   }
 }
 
+// ----- Specific shape classes -----
+class FShape extends BaseShape {
+  constructor(fun) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+      const x = -CONFIG.scaleX + t * (2 * CONFIG.scaleX);
+      const y = fun(x);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, false); // open curve
+  }
+}
+
+class CircleShape extends BaseShape {
+  constructor(radius) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const angle = (i / NUM_VERTICES) * 2 * Math.PI;
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, true); // closed loop
+  }
+}
+
+class SquareShape extends BaseShape {
+  constructor(sideLength) {
+    const half = sideLength / 2;
+    const perimeter = sideLength * 4;
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / NUM_VERTICES; // 0 to 1, exclusive of 1
+      const s = t * perimeter;
+      let x, y;
+      if (s < sideLength) {
+        x = -half + s;
+        y = -half;
+      } else if (s < 2 * sideLength) {
+        x = half;
+        y = -half + (s - sideLength);
+      } else if (s < 3 * sideLength) {
+        x = half - (s - 2 * sideLength);
+        y = half;
+      } else {
+        x = -half;
+        y = half - (s - 3 * sideLength);
+      }
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, true); // closed loop
+  }
+}
+
 // ----- MorphShape: interpolates between two shapes over time -----
-class MorphShape {
+class MorphShape extends Drawable {
   constructor(idx1, idx2, duration = ANIMATION_DURATION) {
+    super();
     this.idx1 = idx1;               // index of first shape
     this.idx2 = idx2;               // index of second shape (target)
     this.duration = duration;
@@ -307,57 +377,21 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories (all shapes created at origin with default scale 1 and rotation 0) -----
+// ----- Shape factories (now return instances of specific classes) -----
 function F(fun) {
-  const vertices = [];
-  for (let i = 0; i < NUM_VERTICES; i++) {
-    const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
-    const x = -CONFIG.scaleX + t * (2 * CONFIG.scaleX);
-    const y = fun(x);
-    vertices.push(new Vec2({ x, y }));
-  }
-  const shape = new Shape(vertices, 2, false); // open curve
+  const shape = new FShape(fun);
   shapes.push(shape);
   return shapes.length - 1;
 }
 
 function Circle(radius) {
-  const vertices = [];
-  for (let i = 0; i < NUM_VERTICES; i++) {
-    const angle = (i / NUM_VERTICES) * 2 * Math.PI;
-    const x = radius * Math.cos(angle);
-    const y = radius * Math.sin(angle);
-    vertices.push(new Vec2({ x, y }));
-  }
-  const shape = new Shape(vertices, 2, true); // closed loop
+  const shape = new CircleShape(radius);
   shapes.push(shape);
   return shapes.length - 1;
 }
 
 function Square(sideLength) {
-  const half = sideLength / 2;
-  const perimeter = sideLength * 4;
-  const vertices = [];
-  for (let i = 0; i < NUM_VERTICES; i++) {
-    const t = i / NUM_VERTICES; // 0 to 1, exclusive of 1
-    const s = t * perimeter;
-    let x, y;
-    if (s < sideLength) {
-      x = -half + s;
-      y = -half;
-    } else if (s < 2 * sideLength) {
-      x = half;
-      y = -half + (s - sideLength);
-    } else if (s < 3 * sideLength) {
-      x = half - (s - 2 * sideLength);
-      y = half;
-    } else {
-      x = -half;
-      y = half - (s - 3 * sideLength);
-    }
-    vertices.push(new Vec2({ x, y }));
-  }
-  const shape = new Shape(vertices, 2, true); // closed loop
+  const shape = new SquareShape(sideLength);
   shapes.push(shape);
   return shapes.length - 1;
 }
@@ -398,8 +432,8 @@ function draw(index) {
   if (!shape) {
     throw new Error(`Shape with index ${index} does not exist.`);
   }
-  // Only regular shapes have progress animation; morph shapes use their own timing.
-  if (shape instanceof Shape) {
+  // Only regular shapes (subclasses of BaseShape) have progress animation.
+  if (shape instanceof BaseShape) {
     shape.animationStart = performance.now();
     shape.progress = 0;
   }
@@ -410,9 +444,9 @@ function draw(index) {
 function animate() {
   const now = performance.now();
 
-  // Update progress only for regular shapes (Shape instances)
+  // Update progress only for regular shapes (BaseShape instances)
   for (const shape of shapes) {
-    if (shape instanceof Shape && shape.animationStart !== null) {
+    if (shape instanceof BaseShape && shape.animationStart !== null) {
       const elapsed = now - shape.animationStart;
       const t = Math.min(elapsed, ANIMATION_DURATION);
       const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
