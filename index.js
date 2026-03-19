@@ -1,23 +1,31 @@
 // utils.ts
-function generateRandomRgbColor() {
-  const r = Math.floor(Math.random() * 256);
-  const g = Math.floor(Math.random() * 256);
-  const b = Math.floor(Math.random() * 256);
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
-// Helper to interpolate between two RGB color strings
-function lerpColor(color1, color2, t) {
-  const parse = (color) => {
-    const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    return match ? [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])] : [0, 0, 0];
-  };
-  const [r1, g1, b1] = parse(color1);
-  const [r2, g2, b2] = parse(color2);
-  const r = Math.round(r1 + (r2 - r1) * t);
-  const g = Math.round(g1 + (g2 - g1) * t);
-  const b = Math.round(b1 + (b2 - b1) * t);
-  return `rgb(${r}, ${g}, ${b})`;
+class Color {
+  constructor(r,g,b) {
+    this.r = r
+    this.g = g
+    this.b = b
+  }
+
+  lerp(other,t) {
+        return new Color(
+          lerp(this.r,other.r,t),
+          lerp(this.g,other.g,t),
+          lerp(this.b,other.b,t),
+        )
+  }
+
+  static random() {
+    return new Color(
+      Math.floor(Math.random() * 256),
+      Math.floor(Math.random() * 256),
+      Math.floor(Math.random() * 256),
+    );
+  }
+
+  toString() {
+    return `rgb(${this.r}, ${this.g}, ${this.b})`;
+  }
 }
 
 // Configuration
@@ -113,7 +121,6 @@ class Vec2 {
 class Shape {
   constructor(
     vertices,
-    color,
     pointSize = 2,
     closed = false,
     translation = { x: 0, y: 0 },
@@ -121,7 +128,7 @@ class Shape {
     rotation = 0  // in radians
   ) {
     this.vertices = vertices;                 // array of Vec2 (relative coordinates)
-    this.color = color;
+    this.color = Color.random();
     this.pointSize = pointSize;
     this.closed = closed;
     this.translation = new Vec2(translation); // world offset
@@ -189,7 +196,7 @@ class MorphShape {
     const scale = this.shape1.scale.lerp(this.shape2.scale, t);
     const rot = lerp(this.shape1.rotation, this.shape2.rotation, t);
     // Interpolate color
-    const color = lerpColor(this.shape1.color, this.shape2.color, t);
+    const color = this.shape1.color.lerp(this.shape2.color, t);
 
     // Interpolate and transform all vertices
     const count = this.shape1.vertices.length; // same as shape2
@@ -319,7 +326,7 @@ function F(fun) {
     const y = fun(x);
     vertices.push(new Vec2({ x, y }));
   }
-  const shape = new Shape(vertices, generateRandomRgbColor(), 2, false); // open curve
+  const shape = new Shape(vertices, 2, false); // open curve
   shapes.push(shape);
   return shapes.length - 1;
 }
@@ -332,7 +339,7 @@ function Circle(radius) {
     const y = radius * Math.sin(angle);
     vertices.push(new Vec2({ x, y }));
   }
-  const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); // closed loop
+  const shape = new Shape(vertices,2, true); // closed loop
   shapes.push(shape);
   return shapes.length - 1;
 }
@@ -360,7 +367,7 @@ function Square(sideLength) {
     }
     vertices.push(new Vec2({ x, y }));
   }
-  const shape = new Shape(vertices, generateRandomRgbColor(), 2, true); // closed loop
+  const shape = new Shape(vertices, 2, true); // closed loop
   shapes.push(shape);
   return shapes.length - 1;
 }
@@ -370,16 +377,19 @@ function Square(sideLength) {
 // Set absolute translation
 function Translate(idx, x, y) {
   shapes[idx].translation = new Vec2({ x, y });
+  return idx
 }
 
 // Set absolute scale (uniform or separate x,y)
 function Scale(idx, sx, sy = sx) {
   shapes[idx].scale = new Vec2({ x: sx, y: sy });
+  return idx
 }
 
 // Set absolute rotation (in radians)
 function Rotate(idx, angle) {
   shapes[idx].rotation = angle;
+  return idx
 }
 
 // ----- Morph: create a shape that interpolates between two shapes -----
@@ -405,6 +415,7 @@ function draw(index) {
     shape.animationStart = performance.now();
     shape.progress = 0;
   }
+  return index
 }
 
 // ----- Animation loop -----
