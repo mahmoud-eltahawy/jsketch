@@ -6,6 +6,20 @@ function generateRandomRgbColor() {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// Helper to interpolate between two RGB color strings
+function lerpColor(color1, color2, t) {
+  const parse = (color) => {
+    const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    return match ? [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])] : [0, 0, 0];
+  };
+  const [r1, g1, b1] = parse(color1);
+  const [r2, g2, b2] = parse(color2);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // Configuration
 const CONFIG = {
   scaleX: 10,
@@ -142,39 +156,40 @@ class Shape {
 
 // ----- MorphShape: interpolates between two shapes over time -----
 class MorphShape {
-  constructor(shape1, shape2, duration = ANIMATION_DURATION, color = generateRandomRgbColor()) {
+  constructor(shape1, shape2, duration = ANIMATION_DURATION) {
     // Capture a snapshot of both shapes (vertices and transforms)
     this.shape1 = {
       vertices: shape1.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
       translation: new Vec2({ x: shape1.translation.x, y: shape1.translation.y }),
       scale: new Vec2({ x: shape1.scale.x, y: shape1.scale.y }),
       rotation: shape1.rotation,
+      color: shape1.color,
     };
     this.shape2 = {
       vertices: shape2.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
       translation: new Vec2({ x: shape2.translation.x, y: shape2.translation.y }),
       scale: new Vec2({ x: shape2.scale.x, y: shape2.scale.y }),
       rotation: shape2.rotation,
+      color: shape2.color,
     };
     this.duration = duration;
-    this.color = color;
-    this.pointSize = 2; // you could also average the two shapes' point sizes
-    this.closed = shape1.closed; // assume both have same closed state (or use shape1's)
+    this.pointSize = 2; // could also average point sizes
+    this.closed = shape1.closed; // assume same closed state (or use shape1's)
     this.animationStart = performance.now(); // start immediately
+    this.finished = false; // becomes true when morph completes
   }
 
   draw() {
     const now = performance.now();
     const elapsed = now - this.animationStart;
-    if (elapsed > this.duration) {
-      // Morph finished – you could optionally remove this shape, but we'll just draw the final state
-    }
     const t = Math.min(elapsed / this.duration, 1);
 
     // Interpolate transforms
     const trans = this.shape1.translation.lerp(this.shape2.translation, t);
     const scale = this.shape1.scale.lerp(this.shape2.scale, t);
     const rot = lerp(this.shape1.rotation, this.shape2.rotation, t);
+    // Interpolate color
+    const color = lerpColor(this.shape1.color, this.shape2.color, t);
 
     // Interpolate and transform all vertices
     const count = this.shape1.vertices.length; // same as shape2
@@ -188,16 +203,21 @@ class MorphShape {
 
     // Draw lines between consecutive transformed vertices
     for (let i = 0; i < count - 1; i++) {
-      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, this.color);
+      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, color);
     }
     if (this.closed) {
-      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, this.color);
+      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, color);
+    }
+
+    // Mark as finished if animation completed
+    if (elapsed >= this.duration) {
+      this.finished = true;
     }
   }
 }
 
 // Global collection of shapes
-const shapes = [];
+let shapes = [];
 
 // ----- Canvas sizing -----
 function boxSize() {
@@ -411,6 +431,9 @@ function animate() {
   for (const shape of shapes) {
     shape.draw(); // MorphShape also has a draw method
   }
+
+  // Remove finished morph shapes
+  shapes = shapes.filter(s => !s.finished);
 
   requestAnimationFrame(animate);
 }
