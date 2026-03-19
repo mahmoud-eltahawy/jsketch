@@ -1,5 +1,3 @@
-// utils.ts
-
 // ----- Linear interpolation -----
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -45,7 +43,7 @@ const FPS = 180;
 const TOTAL_FRAMES = 1000;
 const DDT = 1000 / FPS;                       // ms per frame
 const ANIMATION_DURATION = TOTAL_FRAMES * DDT; // ≈5556 ms
-const NUM_VERTICES = 1000;                     // fixed vertex count for all shapes
+const NUM_VERTICES = 1000;                     // default vertex count for all shapes
 
 const canvas = document.getElementById("box") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -129,9 +127,11 @@ class Vec2 {
 
 // ----- Abstract base class for all drawable objects -----
 abstract class Drawable {
+  id: number;               // unique identifier
   active: boolean = true;
 
-  constructor() {
+  constructor(id: number) {
+    this.id = id;
     if (this.constructor === Drawable) {
       throw new Error("Drawable is an abstract class and cannot be instantiated directly.");
     }
@@ -140,7 +140,7 @@ abstract class Drawable {
   abstract draw(): void;
 }
 
-// ----- Helper class for animated properties (renamed to avoid conflict with Web API) -----
+// ----- Helper class for animated properties -----
 class PropertyAnimation<T> {
   start: T;
   target: T;
@@ -191,8 +191,10 @@ abstract class BaseShape extends Drawable {
   progress: number;
   animationStart: number | null;
   animations: Animations;
+  revealDuration: number;          // total time for reveal animation (ms)
 
   constructor(
+    id: number,
     vertices: Vec2[],
     pointSize = 2,
     closed = false,
@@ -200,7 +202,7 @@ abstract class BaseShape extends Drawable {
     scale: Vec2Params = { x: 1, y: 1 },
     rotation = 0
   ) {
-    super();
+    super(id);
     this.vertices = vertices;
     this.color = Color.random();
     this.pointSize = pointSize;
@@ -215,6 +217,7 @@ abstract class BaseShape extends Drawable {
       scale: null,
       rotation: null,
     };
+    this.revealDuration = ANIMATION_DURATION;
   }
 
   // Update any active animations based on current time
@@ -277,22 +280,22 @@ abstract class BaseShape extends Drawable {
   }
 }
 
-// ----- Specific shape classes -----
+// ----- Specific shape classes (they now pass an id to super) -----
 class FShape extends BaseShape {
-  constructor(fun: (x: number) => number) {
+  constructor(id: number, fun: (x: number) => number) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
-      const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+      const t = i / (NUM_VERTICES - 1);
       const x = -CONFIG.scaleX + t * (2 * CONFIG.scaleX);
       const y = fun(x);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class CircleShape extends BaseShape {
-  constructor(radius: number) {
+  constructor(id: number, radius: number) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const angle = (i / NUM_VERTICES) * 2 * Math.PI;
@@ -300,17 +303,17 @@ class CircleShape extends BaseShape {
       const y = radius * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class SquareShape extends BaseShape {
-  constructor(sideLength: number) {
+  constructor(id: number, sideLength: number) {
     const half = sideLength / 2;
     const perimeter = sideLength * 4;
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
-      const t = i / NUM_VERTICES; // 0 to 1, exclusive of 1
+      const t = i / NUM_VERTICES;
       const s = t * perimeter;
       let x: number, y: number;
       if (s < sideLength) {
@@ -328,39 +331,34 @@ class SquareShape extends BaseShape {
       }
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class RegularPolygonShape extends BaseShape {
-  constructor(radius: number, sides: number) {
-    // Precompute corner points
+  constructor(id: number, radius: number, sides: number) {
     const corners: Vec2[] = [];
     for (let i = 0; i < sides; i++) {
       const angle = (i / sides) * 2 * Math.PI;
-      corners.push(new Vec2({
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle)
-      }));
+      corners.push(new Vec2({ x: radius * Math.cos(angle), y: radius * Math.sin(angle) }));
     }
-    // Distribute NUM_VERTICES points along edges
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
-      const t = i / NUM_VERTICES; // 0 to 1 (exclusive of 1)
+      const t = i / NUM_VERTICES;
       const edgeIndex = Math.floor(t * sides);
-      const edgeT = (t * sides) - edgeIndex; // 0..1 along the edge
+      const edgeT = (t * sides) - edgeIndex;
       const p1 = corners[edgeIndex % sides];
       const p2 = corners[(edgeIndex + 1) % sides];
       const x = p1.x + (p2.x - p1.x) * edgeT;
       const y = p1.y + (p2.y - p1.y) * edgeT;
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class LineShape extends BaseShape {
-  constructor(start: Vec2Params, end: Vec2Params) {
+  constructor(id: number, start: Vec2Params, end: Vec2Params) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -368,12 +366,12 @@ class LineShape extends BaseShape {
       const y = lerp(start.y, end.y, t);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class ParametricCurveShape extends BaseShape {
-  constructor(fx: (t: number) => number, fy: (t: number) => number, tMin = 0, tMax = 1) {
+  constructor(id: number, fx: (t: number) => number, fy: (t: number) => number, tMin = 0, tMax = 1) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -382,12 +380,12 @@ class ParametricCurveShape extends BaseShape {
       const y = fy(param);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class StarShape extends BaseShape {
-  constructor(outerRadius: number, innerRadius: number, points: number) {
+  constructor(id: number, outerRadius: number, innerRadius: number, points: number) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const t = i / NUM_VERTICES;
@@ -398,12 +396,12 @@ class StarShape extends BaseShape {
       const y = r * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class SpiralShape extends BaseShape {
-  constructor(maxRadius: number, turns: number) {
+  constructor(id: number, maxRadius: number, turns: number) {
     const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -413,24 +411,99 @@ class SpiralShape extends BaseShape {
       const y = radius * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
-// ----- MorphShape: interpolates between two shapes over time -----
+// ----- Utility: resample a polyline to a fixed number of points (length‑based) -----
+function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number): Vec2[] {
+  if (vertices.length === 0) return [];
+  if (vertices.length === 1) return Array(numPoints).fill(vertices[0]);
+
+  // Compute cumulative distances
+  const dist: number[] = [0];
+  for (let i = 1; i < vertices.length; i++) {
+    const dx = vertices[i].x - vertices[i-1].x;
+    const dy = vertices[i].y - vertices[i-1].y;
+    dist.push(dist[i-1] + Math.sqrt(dx*dx + dy*dy));
+  }
+  if (closed) {
+    // Add closing segment distance
+    const dx = vertices[0].x - vertices[vertices.length-1].x;
+    const dy = vertices[0].y - vertices[vertices.length-1].y;
+    const closingDist = Math.sqrt(dx*dx + dy*dy);
+    // We'll treat the polyline as cyclic; for sampling we need to consider the loop
+    // We'll create an extended array of segments including the closing edge.
+    // Simpler: we can sample along the perimeter including the closing edge.
+    // We'll build a list of segments with their start and end indices and cumulative length.
+    const segments: { start: Vec2; end: Vec2; len: number; cum: number }[] = [];
+    let total = 0;
+    for (let i = 0; i < vertices.length - 1; i++) {
+      const dx = vertices[i+1].x - vertices[i].x;
+      const dy = vertices[i+1].y - vertices[i].y;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      segments.push({ start: vertices[i], end: vertices[i+1], len, cum: total + len });
+      total += len;
+    }
+    // closing segment
+    const dx = vertices[0].x - vertices[vertices.length-1].x;
+    const dy = vertices[0].y - vertices[vertices.length-1].y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    segments.push({ start: vertices[vertices.length-1], end: vertices[0], len, cum: total + len });
+    total += len;
+
+    const result: Vec2[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const t = i / numPoints; // 0 to 1 (exclusive of 1)
+      const targetDist = t * total;
+      // find segment
+      let segIndex = 0;
+      while (segIndex < segments.length && segments[segIndex].cum < targetDist) segIndex++;
+      if (segIndex >= segments.length) segIndex = segments.length - 1;
+      const seg = segments[segIndex];
+      const prevCum = segIndex === 0 ? 0 : segments[segIndex-1].cum;
+      const segT = (targetDist - prevCum) / seg.len;
+      const x = lerp(seg.start.x, seg.end.x, segT);
+      const y = lerp(seg.start.y, seg.end.y, segT);
+      result.push(new Vec2({ x, y }));
+    }
+    return result;
+  } else {
+    const total = dist[dist.length-1];
+    const result: Vec2[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const t = i / (numPoints - 1); // include end
+      const targetDist = t * total;
+      // find segment
+      let segIndex = 1;
+      while (segIndex < dist.length && dist[segIndex] < targetDist) segIndex++;
+      if (segIndex >= dist.length) segIndex = dist.length - 1;
+      const prevDist = dist[segIndex-1];
+      const segT = (targetDist - prevDist) / (dist[segIndex] - prevDist);
+      const x = lerp(vertices[segIndex-1].x, vertices[segIndex].x, segT);
+      const y = lerp(vertices[segIndex-1].y, vertices[segIndex].y, segT);
+      result.push(new Vec2({ x, y }));
+    }
+    return result;
+  }
+}
+
+// ----- MorphShape: interpolates between two shapes over time, handles different vertex counts -----
 class MorphShape extends Drawable {
-  shapes: Drawable[];
-  idx1: number;
-  idx2: number;
+  id1: number;
+  id2: number;
   duration: number;
   pointSize: number;
   animationStart: number;
+  private resampled1: Vec2[] | null = null;   // cached resampled vertices for shape1
+  private resampled2: Vec2[] | null = null;   // cached resampled vertices for shape2
+  private scene: Scene;                        // reference to scene to fetch shapes
 
-  constructor(shapesArray: Drawable[], idx1: number, idx2: number, duration = ANIMATION_DURATION) {
-    super();
-    this.shapes = shapesArray;
-    this.idx1 = idx1;
-    this.idx2 = idx2;
+  constructor(id: number, scene: Scene, id1: number, id2: number, duration = ANIMATION_DURATION) {
+    super(id);
+    this.scene = scene;
+    this.id1 = id1;
+    this.id2 = id2;
     this.duration = duration;
     this.pointSize = 2;
     this.animationStart = performance.now();
@@ -439,9 +512,18 @@ class MorphShape extends Drawable {
   draw(): void {
     if (!this.active) return;
 
-    const shape1 = this.shapes[this.idx1] as BaseShape;
-    const shape2 = this.shapes[this.idx2] as BaseShape;
-    if (!shape1 || !shape2) return;
+    const shape1 = this.scene.getShape(this.id1) as BaseShape;
+    const shape2 = this.scene.getShape(this.id2) as BaseShape;
+    if (!shape1 || !shape2 || !shape1.active || !shape2.active) return;
+
+    // Ensure both shapes have the same number of vertices for morphing
+    const count = Math.max(shape1.vertices.length, shape2.vertices.length);
+    if (!this.resampled1 || this.resampled1.length !== count) {
+      this.resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
+    }
+    if (!this.resampled2 || this.resampled2.length !== count) {
+      this.resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
+    }
 
     const now = performance.now();
     const elapsed = now - this.animationStart;
@@ -454,11 +536,10 @@ class MorphShape extends Drawable {
     const color = shape1.color.lerp(shape2.color, t);
     const colorStr = color.toString();
 
-    // Interpolate vertices
-    const count = shape1.vertices.length;
+    // Interpolate vertices using resampled arrays
     const transformed: Vec2[] = [];
     for (let i = 0; i < count; i++) {
-      const v = shape1.vertices[i].lerp(shape2.vertices[i], t);
+      const v = this.resampled1[i].lerp(this.resampled2[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
       transformed.push(rotated.add(trans));
@@ -472,14 +553,8 @@ class MorphShape extends Drawable {
       transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
 
-    // Deactivate when animation completes, unless target shape hasn't started drawing
     if (elapsed >= this.duration) {
-      const target = this.shapes[this.idx2] as BaseShape;
-      if (target && target.progress === 0) {
-        // remain active
-      } else {
-        this.active = false;
-      }
+      this.active = false;
     }
   }
 }
@@ -496,15 +571,16 @@ function resize(): void {
 }
 window.addEventListener("resize", resize);
 
-// ----- Text drawing helper (accepts Vec2) -----
+// ----- Text drawing helper (accepts Vec2) with offset to avoid overlap -----
 function drawText(vec2: Vec2, text: string, fontSize = 14, color = "#00FFFF"): void {
   const { x, y } = vec2.normalized();
   ctx.fillStyle = color;
   ctx.font = `${fontSize}px sans-serif`;
-  ctx.fillText(text, x, y);
+  // Offset by 8px right and down so labels don't pile up at the origin
+  ctx.fillText(text, x + 8, y + 8);
 }
 
-// ----- Simple line wrapper (for grid drawing) -----
+// ----- Simple line wrapper -----
 function drawLine(begin: Vec2, end: Vec2, width = 2, color = "#FFFFFF"): void {
   begin.drawLineTo(end, width, color);
 }
@@ -575,197 +651,197 @@ function drawGrid(): void {
   }
 }
 
-// ==================== SHAPE REFERENCE FOR CHAINING ====================
+// ==================== SHAPE REFERENCE (now stores ID) ====================
 class ShapeRef {
   scene: Scene;
-  index: number;
+  id: number;
 
-  constructor(scene: Scene, index: number) {
+  constructor(scene: Scene, id: number) {
     this.scene = scene;
-    this.index = index;
+    this.id = id;
   }
 
   translate(x: number, y: number, duration = 0): this {
-    this.scene.translate(this.index, x, y, duration);
+    this.scene.translate(this.id, x, y, duration);
     return this;
   }
 
   scale(sx: number, sy: number = sx, duration = 0): this {
-    this.scene.scale(this.index, sx, sy, duration);
+    this.scene.scale(this.id, sx, sy, duration);
     return this;
   }
 
   rotate(angle: number, duration = 0): this {
-    this.scene.rotate(this.index, angle, duration);
+    this.scene.rotate(this.id, angle, duration);
     return this;
   }
 
-  reveal(): this {
-    this.scene.reveal(this.index);
+  reveal(duration: number = ANIMATION_DURATION): this {
+    this.scene.reveal(this.id, duration);
     return this;
   }
 
   morph(otherRef: ShapeRef, duration = ANIMATION_DURATION): ShapeRef {
-    const morphIndex = this.scene.morph(this.index, otherRef.index, duration);
-    return new ShapeRef(this.scene, morphIndex);
+    const morphId = this.scene.morph(this.id, otherRef.id, duration);
+    return new ShapeRef(this.scene, morphId);
   }
 
   remove(): void {
-    this.scene.remove(this.index);
+    this.scene.remove(this.id);
   }
 }
 
-// ==================== SCENE CLASS (with MediaRecorder) ====================
+// ==================== SCENE CLASS (with Map and ID management) ====================
 class Scene {
-  shapes: Drawable[] = [];
+  private shapes: Map<number, Drawable> = new Map();
+  private nextId: number = 0;
 
-  // Recording state
+  // Recording state (unchanged)
   private mediaRecorder: MediaRecorder | null = null;
   private recordedChunks: Blob[] = [];
   private recordingStartTime: number | null = null;
   private recordingDuration: number | null = null;
   private recordingTimeout: number | null = null;
 
+  // Get a shape by ID (internal use)
+  getShape(id: number): Drawable | undefined {
+    return this.shapes.get(id);
+  }
+
   // ----- Shape factories (return ShapeRef) -----
   F(fun: (x: number) => number): ShapeRef {
-    const shape = new FShape(fun);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new FShape(id, fun);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   Circle(radius: number): ShapeRef {
-    const shape = new CircleShape(radius);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new CircleShape(id, radius);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   Square(sideLength: number): ShapeRef {
-    const shape = new SquareShape(sideLength);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new SquareShape(id, sideLength);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   RegularPolygon(radius: number, sides: number): ShapeRef {
-    const shape = new RegularPolygonShape(radius, sides);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new RegularPolygonShape(id, radius, sides);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   Line(startX: number, startY: number, endX: number, endY: number): ShapeRef {
-    const shape = new LineShape({ x: startX, y: startY }, { x: endX, y: endY });
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new LineShape(id, { x: startX, y: startY }, { x: endX, y: endY });
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   ParametricCurve(fx: (t: number) => number, fy: (t: number) => number, tMin = 0, tMax = 1): ShapeRef {
-    const shape = new ParametricCurveShape(fx, fy, tMin, tMax);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new ParametricCurveShape(id, fx, fy, tMin, tMax);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   Star(outerRadius: number, innerRadius: number, points = 5): ShapeRef {
-    const shape = new StarShape(outerRadius, innerRadius, points);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new StarShape(id, outerRadius, innerRadius, points);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
   Spiral(maxRadius: number, turns = 3): ShapeRef {
-    const shape = new SpiralShape(maxRadius, turns);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new SpiralShape(id, maxRadius, turns);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
 
-  // ----- Transformations (low‑level, used by ShapeRef) -----
-  translate(idx: number, x: number, y: number, duration = 0): void {
-    const shape = this.shapes[idx];
-    if (!shape) return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.translation = new PropertyAnimation<Vec2>(
-          shape.translation,
-          new Vec2({ x, y }),
-          duration,
-          performance.now()
-        );
-      } else {
-        shape.translation = new Vec2({ x, y });
-        shape.animations.translation = null;
-      }
+  // ----- Transformations (now use ID) -----
+  translate(id: number, x: number, y: number, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0) {
+      shape.animations.translation = new PropertyAnimation<Vec2>(
+        shape.translation,
+        new Vec2({ x, y }),
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.translation = new Vec2({ x, y });
+      shape.animations.translation = null;
     }
   }
 
-  scale(idx: number, sx: number, sy: number = sx, duration = 0): void {
-    const shape = this.shapes[idx];
-    if (!shape) return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.scale = new PropertyAnimation<Vec2>(
-          shape.scale,
-          new Vec2({ x: sx, y: sy }),
-          duration,
-          performance.now()
-        );
-      } else {
-        shape.scale = new Vec2({ x: sx, y: sy });
-        shape.animations.scale = null;
-      }
+  scale(id: number, sx: number, sy: number = sx, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0) {
+      shape.animations.scale = new PropertyAnimation<Vec2>(
+        shape.scale,
+        new Vec2({ x: sx, y: sy }),
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.scale = new Vec2({ x: sx, y: sy });
+      shape.animations.scale = null;
     }
   }
 
-  rotate(idx: number, angle: number, duration = 0): void {
-    const shape = this.shapes[idx];
-    if (!shape) return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.rotation = new PropertyAnimation<number>(
-          shape.rotation,
-          angle,
-          duration,
-          performance.now()
-        );
-      } else {
-        shape.rotation = angle;
-        shape.animations.rotation = null;
-      }
+  rotate(id: number, angle: number, duration = 0): void {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape)) return;
+    if (duration > 0) {
+      shape.animations.rotation = new PropertyAnimation<number>(
+        shape.rotation,
+        angle,
+        duration,
+        performance.now()
+      );
+    } else {
+      shape.rotation = angle;
+      shape.animations.rotation = null;
     }
   }
 
-  // ----- Morph between two shapes (returns index of morph) -----
-  morph(idx1: number, idx2: number, duration = ANIMATION_DURATION): number {
-    if (!this.shapes[idx1] || !this.shapes[idx2]) {
-      throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
+  // ----- Morph between two shapes (returns ID of morph) -----
+  morph(id1: number, id2: number, duration = ANIMATION_DURATION): number {
+    if (!this.shapes.has(id1) || !this.shapes.has(id2)) {
+      throw new Error(`Invalid shape IDs: ${id1}, ${id2}`);
     }
-    const morph = new MorphShape(this.shapes, idx1, idx2, duration);
-    this.shapes.push(morph);
-    return this.shapes.length - 1;
+    const morphId = this.nextId++;
+    const morph = new MorphShape(morphId, this, id1, id2, duration);
+    this.shapes.set(morphId, morph);
+    return morphId;
   }
 
-  // ----- Start segment reveal animation for a shape -----
-  reveal(idx: number): void {
-    const shape = this.shapes[idx];
-    if (!shape) {
-      throw new Error(`Shape with index ${idx} does not exist.`);
-    }
+  // ----- Start segment reveal animation for a shape (with configurable duration) -----
+  reveal(id: number, duration: number = ANIMATION_DURATION): void {
+    const shape = this.shapes.get(id);
+    if (!shape) throw new Error(`Shape with id ${id} does not exist.`);
     if (shape instanceof BaseShape) {
       shape.animationStart = performance.now();
       shape.progress = 0;
+      shape.revealDuration = duration;
     }
   }
 
-  // ----- Remove (deactivate) a shape by index -----
-  remove(idx: number): void {
-    if (idx >= 0 && idx < this.shapes.length) {
-      this.shapes[idx].active = false;
-    }
+  // ----- Remove (deactivate) a shape by ID -----
+  remove(id: number): void {
+    this.shapes.delete(id);
   }
 
-  // ----- Recording -----
-  /**
-   * Starts recording the canvas as a video.
-   * @param options.fps - Frames per second (default 30)
-   * @param options.duration - Recording duration in seconds (if not provided, record until stop() is called)
-   * @param options.mimeType - MIME type for the video (e.g., 'video/webm;codecs=vp9')
-   */
+  // ----- Recording (unchanged) -----
   startRecording(options: { fps?: number; duration?: number; mimeType?: string } = {}): void {
     if (this.mediaRecorder) {
       console.warn('Recording already in progress.');
@@ -775,7 +851,6 @@ class Scene {
     const fps = options.fps ?? 30;
     const mimeType = options.mimeType ?? 'video/webm;codecs=vp9';
 
-    // Check MIME type support
     if (!MediaRecorder.isTypeSupported(mimeType)) {
       console.warn(`MIME type ${mimeType} not supported, falling back to video/webm`);
     }
@@ -800,7 +875,6 @@ class Scene {
       a.click();
       URL.revokeObjectURL(url);
 
-      // Clean up
       this.mediaRecorder = null;
       this.recordedChunks = [];
       this.recordingStartTime = null;
@@ -824,9 +898,6 @@ class Scene {
     console.log(`Recording started at ${fps} fps${options.duration ? ` for ${options.duration} seconds` : ''}`);
   }
 
-  /**
-   * Stops the current recording and downloads the video.
-   */
   stopRecording(): void {
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -835,16 +906,16 @@ class Scene {
 
   // ----- Update all shapes (progress & animations) -----
   update(now: number): void {
-    for (const shape of this.shapes) {
+    for (const shape of this.shapes.values()) {
       if (shape instanceof BaseShape && shape.active) {
-        // Update drawing progress
+        // Update drawing progress using shape's revealDuration
         if (shape.animationStart !== null) {
           const elapsed = now - shape.animationStart;
-          const t = Math.min(elapsed, ANIMATION_DURATION);
-          const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
+          const t = Math.min(elapsed / shape.revealDuration, 1);
+          const targetProgress = Math.floor(t * shape.vertices.length);
           shape.progress = Math.min(targetProgress, shape.vertices.length);
 
-          if (elapsed >= ANIMATION_DURATION) {
+          if (elapsed >= shape.revealDuration) {
             shape.animationStart = null;
           }
         }
@@ -859,19 +930,18 @@ class Scene {
     clearBackground();
     drawGrid();
 
-    for (const shape of this.shapes) {
+    for (const shape of this.shapes.values()) {
       if (shape.active) {
         shape.draw();
       }
     }
   }
 
-  // ----- Animation loop entry point (called by requestAnimationFrame) -----
+  // ----- Animation loop entry point -----
   animate(now: number): void {
     this.update(now);
     this.draw();
 
-    // Check if we need to auto-stop based on elapsed time (in case setTimeout is delayed)
     if (this.mediaRecorder && this.recordingStartTime && this.recordingDuration) {
       const elapsed = (now - this.recordingStartTime) / 1000;
       if (elapsed >= this.recordingDuration) {
