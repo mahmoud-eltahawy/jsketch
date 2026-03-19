@@ -1,25 +1,28 @@
 // utils.ts
 
+// ----- Linear interpolation (defined before Color so it's available) -----
+const lerp = (a, b, t) => a + (b - a) * t;
+
 class Color {
-  constructor(r,g,b) {
-    this.r = r
-    this.g = g
-    this.b = b
+  constructor(r, g, b) {
+    this.r = r;
+    this.g = g;
+    this.b = b;
   }
 
-  lerp(other,t) {
-        return new Color(
-          lerp(this.r,other.r,t),
-          lerp(this.g,other.g,t),
-          lerp(this.b,other.b,t),
-        )
+  lerp(other, t) {
+    return new Color(
+      lerp(this.r, other.r, t),
+      lerp(this.g, other.g, t),
+      lerp(this.b, other.b, t)
+    );
   }
 
   static random() {
     return new Color(
       Math.floor(Math.random() * 256),
       Math.floor(Math.random() * 256),
-      Math.floor(Math.random() * 256),
+      Math.floor(Math.random() * 256)
     );
   }
 
@@ -43,11 +46,6 @@ const NUM_VERTICES = 1000;                     // fixed vertex count for all sha
 const canvas = document.getElementById("box");
 const ctx = canvas.getContext("2d");
 let gridLevel = 3; // 1 = axes only, 2 = integer grid, 3 = half‑step grid
-
-// ----- Linear interpolation -----
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
 
 // ----- 2D vector with coordinate transformations -----
 class Vec2 {
@@ -147,16 +145,18 @@ class Shape {
       return rotated.add(this.translation);
     };
 
+    const colorStr = this.color.toString(); // convert once
+
     for (let i = 0; i < this.progress - 1; i++) {
       const a = getTransformed(this.vertices[i]);
       const b = getTransformed(this.vertices[i + 1]);
-      a.drawLineTo(b, this.pointSize, this.color);
+      a.drawLineTo(b, this.pointSize, colorStr);
     }
     // Closing segment
     if (this.closed && this.progress === this.vertices.length) {
       const a = getTransformed(this.vertices[this.vertices.length - 1]);
       const b = getTransformed(this.vertices[0]);
-      a.drawLineTo(b, this.pointSize, this.color);
+      a.drawLineTo(b, this.pointSize, colorStr);
     }
   }
 }
@@ -197,6 +197,7 @@ class MorphShape {
     const rot = lerp(this.shape1.rotation, this.shape2.rotation, t);
     // Interpolate color
     const color = this.shape1.color.lerp(this.shape2.color, t);
+    const colorStr = color.toString();
 
     // Interpolate and transform all vertices
     const count = this.shape1.vertices.length; // same as shape2
@@ -210,10 +211,10 @@ class MorphShape {
 
     // Draw lines between consecutive transformed vertices
     for (let i = 0; i < count - 1; i++) {
-      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, color);
+      transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
     }
     if (this.closed) {
-      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, color);
+      transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
 
     // Mark as finished if animation completed
@@ -339,7 +340,7 @@ function Circle(radius) {
     const y = radius * Math.sin(angle);
     vertices.push(new Vec2({ x, y }));
   }
-  const shape = new Shape(vertices,2, true); // closed loop
+  const shape = new Shape(vertices, 2, true); // closed loop
   shapes.push(shape);
   return shapes.length - 1;
 }
@@ -377,19 +378,19 @@ function Square(sideLength) {
 // Set absolute translation
 function Translate(idx, x, y) {
   shapes[idx].translation = new Vec2({ x, y });
-  return idx
+  return idx;
 }
 
 // Set absolute scale (uniform or separate x,y)
 function Scale(idx, sx, sy = sx) {
   shapes[idx].scale = new Vec2({ x: sx, y: sy });
-  return idx
+  return idx;
 }
 
 // Set absolute rotation (in radians)
 function Rotate(idx, angle) {
   shapes[idx].rotation = angle;
-  return idx
+  return idx;
 }
 
 // ----- Morph: create a shape that interpolates between two shapes -----
@@ -415,7 +416,7 @@ function draw(index) {
     shape.animationStart = performance.now();
     shape.progress = 0;
   }
-  return index
+  return index;
 }
 
 // ----- Animation loop -----
