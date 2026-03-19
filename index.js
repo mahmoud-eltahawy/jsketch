@@ -32,6 +32,9 @@ var NUM_VERTICES = 1000;
 var canvas = document.getElementById("box");
 var ctx = canvas.getContext("2d");
 var gridLevel = 3;
+var offscreenCanvas = null;
+var offscreenCtx = null;
+var gridDirty = true;
 
 class Vec2 {
   x;
@@ -89,8 +92,10 @@ class Vec2 {
 }
 
 class Drawable {
+  id;
   active = true;
-  constructor() {
+  constructor(id) {
+    this.id = id;
     if (this.constructor === Drawable) {
       throw new Error("Drawable is an abstract class and cannot be instantiated directly.");
     }
@@ -136,8 +141,11 @@ class BaseShape extends Drawable {
   progress;
   animationStart;
   animations;
-  constructor(vertices, pointSize = 2, closed = false, translation = { x: 0, y: 0 }, scale = { x: 1, y: 1 }, rotation = 0) {
-    super();
+  revealDuration;
+  cachedTransformed = null;
+  dirtyTransform = true;
+  constructor(id, vertices, pointSize = 2, closed = false, translation = { x: 0, y: 0 }, scale = { x: 1, y: 1 }, rotation = 0) {
+    super(id);
     this.vertices = vertices;
     this.color = Color.random();
     this.pointSize = pointSize;
@@ -152,60 +160,88 @@ class BaseShape extends Drawable {
       scale: null,
       rotation: null
     };
+    this.revealDuration = ANIMATION_DURATION;
+  }
+  setTranslation(t) {
+    this.translation = t;
+    this.dirtyTransform = true;
+  }
+  setScale(s) {
+    this.scale = s;
+    this.dirtyTransform = true;
+  }
+  setRotation(r) {
+    this.rotation = r;
+    this.dirtyTransform = true;
   }
   updateAnimations(now) {
     if (this.animations.translation) {
       const anim = this.animations.translation;
       if (anim.isFinished(now)) {
-        this.translation = anim.target;
+        this.setTranslation(anim.target);
         this.animations.translation = null;
       } else {
-        this.translation = anim.value(now);
+        this.setTranslation(anim.value(now));
       }
     }
     if (this.animations.scale) {
       const anim = this.animations.scale;
       if (anim.isFinished(now)) {
-        this.scale = anim.target;
+        this.setScale(anim.target);
         this.animations.scale = null;
       } else {
-        this.scale = anim.value(now);
+        this.setScale(anim.value(now));
       }
     }
     if (this.animations.rotation) {
       const anim = this.animations.rotation;
       if (anim.isFinished(now)) {
-        this.rotation = anim.target;
+        this.setRotation(anim.target);
         this.animations.rotation = null;
       } else {
-        this.rotation = anim.value(now);
+        this.setRotation(anim.value(now));
       }
     }
   }
-  draw() {
-    if (!this.active)
-      return;
-    const getTransformed = (v) => {
+  getTransformedPoints() {
+    if (!this.dirtyTransform && this.cachedTransformed) {
+      return this.cachedTransformed;
+    }
+    const transformed = [];
+    const half = boxSize() / 2;
+    for (const v of this.vertices) {
       const scaled = new Vec2({ x: v.x * this.scale.x, y: v.y * this.scale.y });
       const rotated = scaled.rotate(this.rotation);
-      return rotated.add(this.translation);
-    };
-    const colorStr = this.color.toString();
-    for (let i = 0;i < this.progress - 1; i++) {
-      const a = getTransformed(this.vertices[i]);
-      const b = getTransformed(this.vertices[i + 1]);
-      a.drawLineTo(b, this.pointSize, colorStr);
+      const world = rotated.add(this.translation);
+      const screenX = half * (1 + world.x / CONFIG.scaleX);
+      const screenY = half * (1 - world.y / CONFIG.scaleY);
+      transformed.push({ x: screenX, y: screenY });
     }
-    if (this.closed && this.progress === this.vertices.length) {
-      const a = getTransformed(this.vertices[this.vertices.length - 1]);
-      const b = getTransformed(this.vertices[0]);
-      a.drawLineTo(b, this.pointSize, colorStr);
+    this.cachedTransformed = transformed;
+    this.dirtyTransform = false;
+    return transformed;
+  }
+  draw() {
+    if (!this.active || this.progress === 0)
+      return;
+    const points = this.getTransformedPoints();
+    const count = this.progress;
+    const path = new Path2D;
+    path.moveTo(points[0].x, points[0].y);
+    for (let i = 1;i < count; i++) {
+      path.lineTo(points[i].x, points[i].y);
     }
+    if (this.closed && count === this.vertices.length) {
+      path.lineTo(points[0].x, points[0].y);
+    }
+    ctx.strokeStyle = this.color.toString();
+    ctx.lineWidth = this.pointSize;
+    ctx.stroke(path);
   }
 }
 
 class FShape extends BaseShape {
-  constructor(fun) {
+  constructor(id, fun) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -213,12 +249,12 @@ class FShape extends BaseShape {
       const y = fun(x);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class CircleShape extends BaseShape {
-  constructor(radius) {
+  constructor(id, radius) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const angle = i / NUM_VERTICES * 2 * Math.PI;
@@ -226,12 +262,12 @@ class CircleShape extends BaseShape {
       const y = radius * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class SquareShape extends BaseShape {
-  constructor(sideLength) {
+  constructor(id, sideLength) {
     const half = sideLength / 2;
     const perimeter = sideLength * 4;
     const vertices = [];
@@ -254,19 +290,16 @@ class SquareShape extends BaseShape {
       }
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class RegularPolygonShape extends BaseShape {
-  constructor(radius, sides) {
+  constructor(id, radius, sides) {
     const corners = [];
     for (let i = 0;i < sides; i++) {
       const angle = i / sides * 2 * Math.PI;
-      corners.push(new Vec2({
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle)
-      }));
+      corners.push(new Vec2({ x: radius * Math.cos(angle), y: radius * Math.sin(angle) }));
     }
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
@@ -279,12 +312,12 @@ class RegularPolygonShape extends BaseShape {
       const y = p1.y + (p2.y - p1.y) * edgeT;
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class LineShape extends BaseShape {
-  constructor(start, end) {
+  constructor(id, start, end) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -292,12 +325,12 @@ class LineShape extends BaseShape {
       const y = lerp(start.y, end.y, t);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class ParametricCurveShape extends BaseShape {
-  constructor(fx, fy, tMin = 0, tMax = 1) {
+  constructor(id, fx, fy, tMin = 0, tMax = 1) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -306,12 +339,12 @@ class ParametricCurveShape extends BaseShape {
       const y = fy(param);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
   }
 }
 
 class StarShape extends BaseShape {
-  constructor(outerRadius, innerRadius, points) {
+  constructor(id, outerRadius, innerRadius, points) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / NUM_VERTICES;
@@ -322,12 +355,12 @@ class StarShape extends BaseShape {
       const y = r * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, true);
+    super(id, vertices, 2, true);
   }
 }
 
 class SpiralShape extends BaseShape {
-  constructor(maxRadius, turns) {
+  constructor(id, maxRadius, turns) {
     const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / (NUM_VERTICES - 1);
@@ -337,22 +370,90 @@ class SpiralShape extends BaseShape {
       const y = radius * Math.sin(angle);
       vertices.push(new Vec2({ x, y }));
     }
-    super(vertices, 2, false);
+    super(id, vertices, 2, false);
+  }
+}
+function resamplePolyline(vertices, closed, numPoints) {
+  if (vertices.length === 0)
+    return [];
+  if (vertices.length === 1)
+    return Array(numPoints).fill(vertices[0]);
+  const dist = [0];
+  for (let i = 1;i < vertices.length; i++) {
+    const dx = vertices[i].x - vertices[i - 1].x;
+    const dy = vertices[i].y - vertices[i - 1].y;
+    dist.push(dist[i - 1] + Math.sqrt(dx * dx + dy * dy));
+  }
+  if (closed) {
+    let dx = vertices[0].x - vertices[vertices.length - 1].x;
+    let dy = vertices[0].y - vertices[vertices.length - 1].y;
+    const closingDist = Math.sqrt(dx * dx + dy * dy);
+    const segments = [];
+    let total = 0;
+    for (let i = 0;i < vertices.length - 1; i++) {
+      const dx2 = vertices[i + 1].x - vertices[i].x;
+      const dy2 = vertices[i + 1].y - vertices[i].y;
+      const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      segments.push({ start: vertices[i], end: vertices[i + 1], len: len2, cum: total + len2 });
+      total += len2;
+    }
+    dx = vertices[0].x - vertices[vertices.length - 1].x;
+    dy = vertices[0].y - vertices[vertices.length - 1].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    segments.push({ start: vertices[vertices.length - 1], end: vertices[0], len, cum: total + len });
+    total += len;
+    const result = [];
+    for (let i = 0;i < numPoints; i++) {
+      const t = i / numPoints;
+      const targetDist = t * total;
+      let segIndex = 0;
+      while (segIndex < segments.length && segments[segIndex].cum < targetDist)
+        segIndex++;
+      if (segIndex >= segments.length)
+        segIndex = segments.length - 1;
+      const seg = segments[segIndex];
+      const prevCum = segIndex === 0 ? 0 : segments[segIndex - 1].cum;
+      const segT = (targetDist - prevCum) / seg.len;
+      const x = lerp(seg.start.x, seg.end.x, segT);
+      const y = lerp(seg.start.y, seg.end.y, segT);
+      result.push(new Vec2({ x, y }));
+    }
+    return result;
+  } else {
+    const total = dist[dist.length - 1];
+    const result = [];
+    for (let i = 0;i < numPoints; i++) {
+      const t = i / (numPoints - 1);
+      const targetDist = t * total;
+      let segIndex = 1;
+      while (segIndex < dist.length && dist[segIndex] < targetDist)
+        segIndex++;
+      if (segIndex >= dist.length)
+        segIndex = dist.length - 1;
+      const prevDist = dist[segIndex - 1];
+      const segT = (targetDist - prevDist) / (dist[segIndex] - prevDist);
+      const x = lerp(vertices[segIndex - 1].x, vertices[segIndex].x, segT);
+      const y = lerp(vertices[segIndex - 1].y, vertices[segIndex].y, segT);
+      result.push(new Vec2({ x, y }));
+    }
+    return result;
   }
 }
 
 class MorphShape extends Drawable {
-  shapes;
-  idx1;
-  idx2;
+  id1;
+  id2;
   duration;
   pointSize;
   animationStart;
-  constructor(shapesArray, idx1, idx2, duration = ANIMATION_DURATION) {
-    super();
-    this.shapes = shapesArray;
-    this.idx1 = idx1;
-    this.idx2 = idx2;
+  resampled1 = null;
+  resampled2 = null;
+  scene;
+  constructor(id, scene, id1, id2, duration = ANIMATION_DURATION) {
+    super(id);
+    this.scene = scene;
+    this.id1 = id1;
+    this.id2 = id2;
     this.duration = duration;
     this.pointSize = 2;
     this.animationStart = performance.now();
@@ -360,10 +461,17 @@ class MorphShape extends Drawable {
   draw() {
     if (!this.active)
       return;
-    const shape1 = this.shapes[this.idx1];
-    const shape2 = this.shapes[this.idx2];
-    if (!shape1 || !shape2)
+    const shape1 = this.scene.getShape(this.id1);
+    const shape2 = this.scene.getShape(this.id2);
+    if (!shape1 || !shape2 || !shape1.active || !shape2.active)
       return;
+    const count = Math.max(shape1.vertices.length, shape2.vertices.length);
+    if (!this.resampled1 || this.resampled1.length !== count) {
+      this.resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
+    }
+    if (!this.resampled2 || this.resampled2.length !== count) {
+      this.resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
+    }
     const now = performance.now();
     const elapsed = now - this.animationStart;
     const t = Math.min(elapsed / this.duration, 1);
@@ -372,10 +480,9 @@ class MorphShape extends Drawable {
     const rot = lerp(shape1.rotation, shape2.rotation, t);
     const color = shape1.color.lerp(shape2.color, t);
     const colorStr = color.toString();
-    const count = shape1.vertices.length;
     const transformed = [];
     for (let i = 0;i < count; i++) {
-      const v = shape1.vertices[i].lerp(shape2.vertices[i], t);
+      const v = this.resampled1[i].lerp(this.resampled2[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
       transformed.push(rotated.add(trans));
@@ -387,10 +494,7 @@ class MorphShape extends Drawable {
       transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
     if (elapsed >= this.duration) {
-      const target = this.shapes[this.idx2];
-      if (target && target.progress === 0) {} else {
-        this.active = false;
-      }
+      this.active = false;
     }
   }
 }
@@ -401,17 +505,9 @@ function resize() {
   const s = boxSize();
   canvas.width = s;
   canvas.height = s;
+  gridDirty = true;
 }
 window.addEventListener("resize", resize);
-function drawText(vec2, text, fontSize = 14, color = "#00FFFF") {
-  const { x, y } = vec2.normalized();
-  ctx.fillStyle = color;
-  ctx.font = `${fontSize}px sans-serif`;
-  ctx.fillText(text, x, y);
-}
-function drawLine(begin, end, width = 2, color = "#FFFFFF") {
-  begin.drawLineTo(end, width, color);
-}
 function clearBackground() {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, boxSize(), boxSize());
@@ -419,173 +515,225 @@ function clearBackground() {
 function drawGrid() {
   if (!gridLevel)
     return;
-  if (![1, 2, 3].includes(gridLevel)) {
-    throw new Error(`gridLevel must be 1, 2, 3 or falsy (got ${gridLevel})`);
+  const size = boxSize();
+  if (!offscreenCanvas || offscreenCanvas.width !== size || offscreenCanvas.height !== size) {
+    offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = size;
+    offscreenCanvas.height = size;
+    offscreenCtx = offscreenCanvas.getContext("2d");
+    gridDirty = true;
   }
-  if (gridLevel >= 1) {
-    drawLine(new Vec2({ x: -CONFIG.scaleX, y: 0 }), new Vec2({ x: CONFIG.scaleX, y: 0 }), 3);
-    drawLine(new Vec2({ x: 0, y: -CONFIG.scaleY }), new Vec2({ x: 0, y: CONFIG.scaleY }), 3);
+  if (gridDirty) {
+    if (!offscreenCtx)
+      return;
+    offscreenCtx.clearRect(0, 0, size, size);
+    offscreenCtx.fillStyle = "#000000";
+    offscreenCtx.fillRect(0, 0, size, size);
+    const half2 = size / 2;
+    const scaleX = CONFIG.scaleX;
+    const scaleY = CONFIG.scaleY;
+    const line = (x1, y1, x2, y2, width, color) => {
+      offscreenCtx.strokeStyle = color;
+      offscreenCtx.lineWidth = width;
+      offscreenCtx.beginPath();
+      offscreenCtx.moveTo(x1, y1);
+      offscreenCtx.lineTo(x2, y2);
+      offscreenCtx.stroke();
+    };
+    if (gridLevel >= 1) {
+      line(0, half2, size, half2, 3, "#FFFFFF");
+      line(half2, 0, half2, size, 3, "#FFFFFF");
+    }
+    for (let i = -scaleY;i <= scaleY; i++) {
+      const yScreen = half2 * (1 - i / scaleY);
+      if (gridLevel >= 2) {
+        line(0, yScreen, size, yScreen, 1, "#FFFFFF");
+      }
+      if (gridLevel === 3) {
+        const yHalf = half2 * (1 - (i + 0.5) / scaleY);
+        line(0, yHalf, size, yHalf, 0.3, "#FFFFFF");
+      }
+    }
+    for (let i = -scaleX;i <= scaleX; i++) {
+      const xScreen = half2 * (1 + i / scaleX);
+      if (gridLevel >= 2) {
+        line(xScreen, 0, xScreen, size, 1, "#FFFFFF");
+      }
+      if (gridLevel === 3) {
+        const xHalf = half2 * (1 + (i + 0.5) / scaleX);
+        line(xHalf, 0, xHalf, size, 0.3, "#FFFFFF");
+      }
+    }
+    gridDirty = false;
   }
+  ctx.drawImage(offscreenCanvas, 0, 0);
+  ctx.fillStyle = "#00FFFF";
+  ctx.font = "14px sans-serif";
+  const half = size / 2;
   for (let i = -CONFIG.scaleY;i <= CONFIG.scaleY; i++) {
-    drawText(new Vec2({ x: 0, y: i }), i.toString());
-    if (gridLevel >= 2) {
-      drawLine(new Vec2({ x: -CONFIG.scaleX, y: i }), new Vec2({ x: CONFIG.scaleX, y: i }), 1);
-    }
-    if (gridLevel === 3) {
-      drawLine(new Vec2({ x: -CONFIG.scaleX, y: i + 0.5 }), new Vec2({ x: CONFIG.scaleX, y: i + 0.5 }), 0.3);
-    }
+    const yScreen = half * (1 - i / CONFIG.scaleY);
+    ctx.fillText(i.toString(), 8, yScreen + 8);
   }
   for (let i = -CONFIG.scaleX;i <= CONFIG.scaleX; i++) {
-    drawText(new Vec2({ x: i, y: 0 }), i.toString());
-    if (gridLevel >= 2) {
-      drawLine(new Vec2({ x: i, y: -CONFIG.scaleY }), new Vec2({ x: i, y: CONFIG.scaleY }), 1);
-    }
-    if (gridLevel === 3) {
-      drawLine(new Vec2({ x: i + 0.5, y: -CONFIG.scaleY }), new Vec2({ x: i + 0.5, y: CONFIG.scaleY }), 0.3);
-    }
+    const xScreen = half * (1 + i / CONFIG.scaleX);
+    ctx.fillText(i.toString(), xScreen + 8, 8);
   }
 }
 
 class ShapeRef {
   scene;
-  index;
-  constructor(scene, index) {
+  id;
+  constructor(scene, id) {
     this.scene = scene;
-    this.index = index;
+    this.id = id;
   }
   translate(x, y, duration = 0) {
-    this.scene.translate(this.index, x, y, duration);
+    this.scene.translate(this.id, x, y, duration);
     return this;
   }
   scale(sx, sy = sx, duration = 0) {
-    this.scene.scale(this.index, sx, sy, duration);
+    this.scene.scale(this.id, sx, sy, duration);
     return this;
   }
   rotate(angle, duration = 0) {
-    this.scene.rotate(this.index, angle, duration);
+    this.scene.rotate(this.id, angle, duration);
     return this;
   }
-  reveal() {
-    this.scene.reveal(this.index);
+  reveal(duration = ANIMATION_DURATION) {
+    this.scene.reveal(this.id, duration);
     return this;
   }
   morph(otherRef, duration = ANIMATION_DURATION) {
-    const morphIndex = this.scene.morph(this.index, otherRef.index, duration);
-    return new ShapeRef(this.scene, morphIndex);
+    const morphId = this.scene.morph(this.id, otherRef.id, duration);
+    return new ShapeRef(this.scene, morphId);
   }
   remove() {
-    this.scene.remove(this.index);
+    this.scene.remove(this.id);
   }
 }
 
 class Scene {
-  shapes = [];
+  shapes = new Map;
+  nextId = 0;
   mediaRecorder = null;
   recordedChunks = [];
   recordingStartTime = null;
   recordingDuration = null;
   recordingTimeout = null;
+  pauseStart = null;
+  pauseDuration = null;
+  totalPausedTime = 0;
+  getShape(id) {
+    return this.shapes.get(id);
+  }
   F(fun) {
-    const shape = new FShape(fun);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new FShape(id, fun);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   Circle(radius) {
-    const shape = new CircleShape(radius);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new CircleShape(id, radius);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   Square(sideLength) {
-    const shape = new SquareShape(sideLength);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new SquareShape(id, sideLength);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   RegularPolygon(radius, sides) {
-    const shape = new RegularPolygonShape(radius, sides);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new RegularPolygonShape(id, radius, sides);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   Line(startX, startY, endX, endY) {
-    const shape = new LineShape({ x: startX, y: startY }, { x: endX, y: endY });
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new LineShape(id, { x: startX, y: startY }, { x: endX, y: endY });
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   ParametricCurve(fx, fy, tMin = 0, tMax = 1) {
-    const shape = new ParametricCurveShape(fx, fy, tMin, tMax);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new ParametricCurveShape(id, fx, fy, tMin, tMax);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   Star(outerRadius, innerRadius, points = 5) {
-    const shape = new StarShape(outerRadius, innerRadius, points);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new StarShape(id, outerRadius, innerRadius, points);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
   Spiral(maxRadius, turns = 3) {
-    const shape = new SpiralShape(maxRadius, turns);
-    this.shapes.push(shape);
-    return new ShapeRef(this, this.shapes.length - 1);
+    const id = this.nextId++;
+    const shape = new SpiralShape(id, maxRadius, turns);
+    this.shapes.set(id, shape);
+    return new ShapeRef(this, id);
   }
-  translate(idx, x, y, duration = 0) {
-    const shape = this.shapes[idx];
-    if (!shape)
+  translate(id, x, y, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
       return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now());
-      } else {
-        shape.translation = new Vec2({ x, y });
-        shape.animations.translation = null;
-      }
+    if (duration > 0) {
+      shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.setTranslation(new Vec2({ x, y }));
+      shape.animations.translation = null;
     }
   }
-  scale(idx, sx, sy = sx, duration = 0) {
-    const shape = this.shapes[idx];
-    if (!shape)
+  scale(id, sx, sy = sx, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
       return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now());
-      } else {
-        shape.scale = new Vec2({ x: sx, y: sy });
-        shape.animations.scale = null;
-      }
+    if (duration > 0) {
+      shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.setScale(new Vec2({ x: sx, y: sy }));
+      shape.animations.scale = null;
     }
   }
-  rotate(idx, angle, duration = 0) {
-    const shape = this.shapes[idx];
-    if (!shape)
+  rotate(id, angle, duration = 0) {
+    const shape = this.shapes.get(id);
+    if (!shape || !(shape instanceof BaseShape))
       return;
-    if (shape instanceof BaseShape) {
-      if (duration > 0) {
-        shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, performance.now());
-      } else {
-        shape.rotation = angle;
-        shape.animations.rotation = null;
-      }
+    if (duration > 0) {
+      shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, performance.now() - this.totalPausedTime);
+    } else {
+      shape.setRotation(angle);
+      shape.animations.rotation = null;
     }
   }
-  morph(idx1, idx2, duration = ANIMATION_DURATION) {
-    if (!this.shapes[idx1] || !this.shapes[idx2]) {
-      throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
+  morph(id1, id2, duration = ANIMATION_DURATION) {
+    if (!this.shapes.has(id1) || !this.shapes.has(id2)) {
+      throw new Error(`Invalid shape IDs: ${id1}, ${id2}`);
     }
-    const morph = new MorphShape(this.shapes, idx1, idx2, duration);
-    this.shapes.push(morph);
-    return this.shapes.length - 1;
+    const morphId = this.nextId++;
+    const morph = new MorphShape(morphId, this, id1, id2, duration);
+    morph.animationStart -= this.totalPausedTime;
+    this.shapes.set(morphId, morph);
+    return morphId;
   }
-  reveal(idx) {
-    const shape = this.shapes[idx];
-    if (!shape) {
-      throw new Error(`Shape with index ${idx} does not exist.`);
-    }
+  reveal(id, duration = ANIMATION_DURATION) {
+    const shape = this.shapes.get(id);
+    if (!shape)
+      throw new Error(`Shape with id ${id} does not exist.`);
     if (shape instanceof BaseShape) {
-      shape.animationStart = performance.now();
+      shape.animationStart = performance.now() - this.totalPausedTime;
       shape.progress = 0;
+      shape.revealDuration = duration;
     }
   }
-  remove(idx) {
-    if (idx >= 0 && idx < this.shapes.length) {
-      this.shapes[idx].active = false;
-    }
+  remove(id) {
+    this.shapes.delete(id);
+  }
+  wait(ms) {
+    this.pauseStart = performance.now();
+    this.pauseDuration = ms;
+    return this;
   }
   startRecording(options = {}) {
     if (this.mediaRecorder) {
@@ -638,29 +786,56 @@ class Scene {
       this.mediaRecorder.stop();
     }
   }
-  async wait(seconds) {
-    return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-  }
   update(now) {
-    for (const shape of this.shapes) {
+    if (this.pauseStart !== null && this.pauseDuration !== null) {
+      const elapsedPause = now - this.pauseStart;
+      if (elapsedPause < this.pauseDuration) {
+        return;
+      } else {
+        const actualPause = Math.min(elapsedPause, this.pauseDuration);
+        this.totalPausedTime += actualPause;
+        for (const shape of this.shapes.values()) {
+          if (shape instanceof BaseShape) {
+            if (shape.animationStart !== null) {
+              shape.animationStart += actualPause;
+            }
+            if (shape.animations.translation) {
+              shape.animations.translation.startTime += actualPause;
+            }
+            if (shape.animations.scale) {
+              shape.animations.scale.startTime += actualPause;
+            }
+            if (shape.animations.rotation) {
+              shape.animations.rotation.startTime += actualPause;
+            }
+          } else if (shape instanceof MorphShape) {
+            shape.animationStart += actualPause;
+          }
+        }
+        this.pauseStart = null;
+        this.pauseDuration = null;
+      }
+    }
+    const effectiveNow = now - this.totalPausedTime;
+    for (const shape of this.shapes.values()) {
       if (shape instanceof BaseShape && shape.active) {
         if (shape.animationStart !== null) {
-          const elapsed = now - shape.animationStart;
-          const t = Math.min(elapsed, ANIMATION_DURATION);
-          const targetProgress = Math.floor(t / ANIMATION_DURATION * shape.vertices.length);
+          const elapsed = effectiveNow - shape.animationStart;
+          const t = Math.min(elapsed / shape.revealDuration, 1);
+          const targetProgress = Math.floor(t * shape.vertices.length);
           shape.progress = Math.min(targetProgress, shape.vertices.length);
-          if (elapsed >= ANIMATION_DURATION) {
+          if (elapsed >= shape.revealDuration) {
             shape.animationStart = null;
           }
         }
-        shape.updateAnimations(now);
+        shape.updateAnimations(effectiveNow);
       }
     }
   }
   draw() {
     clearBackground();
     drawGrid();
-    for (const shape of this.shapes) {
+    for (const shape of this.shapes.values()) {
       if (shape.active) {
         shape.draw();
       }
