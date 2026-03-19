@@ -1017,13 +1017,18 @@ class MorphShape extends Drawable {
     const strokeColor = shape1.strokeColor.lerp(shape2.strokeColor, t);
     const fillColor = shape1.fillColor && shape2.fillColor ? shape1.fillColor.lerp(shape2.fillColor, t) : shape1.fillColor || shape2.fillColor;
     const opacity = lerp(shape1.opacity, shape2.opacity, t);
-    const transformed = [];
+    const worldPoints = [];
     for (let i = 0;i < count; i++) {
       const v = resampled1[i].lerp(resampled2[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
-      transformed.push(rotated.add(trans));
+      worldPoints.push(rotated.add(trans));
     }
+    const half = boxSize() / 2;
+    const screenPoints = worldPoints.map((p) => ({
+      x: half * (1 + p.x / CONFIG.scaleX),
+      y: half * (1 - p.y / CONFIG.scaleY)
+    }));
     ctx.save();
     ctx.globalAlpha = opacity;
     ctx.lineWidth = this.pointSize;
@@ -1031,12 +1036,12 @@ class MorphShape extends Drawable {
     if (fillColor)
       ctx.fillStyle = fillColor.toString();
     const path = new Path2D;
-    path.moveTo(transformed[0].x, transformed[0].y);
-    for (let i = 1;i < count; i++) {
-      path.lineTo(transformed[i].x, transformed[i].y);
+    path.moveTo(screenPoints[0].x, screenPoints[0].y);
+    for (let i = 1;i < screenPoints.length; i++) {
+      path.lineTo(screenPoints[i].x, screenPoints[i].y);
     }
     if (shape2.closed) {
-      path.lineTo(transformed[0].x, transformed[0].y);
+      path.lineTo(screenPoints[0].x, screenPoints[0].y);
     }
     if (fillColor)
       ctx.fill(path);
