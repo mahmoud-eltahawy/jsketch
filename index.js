@@ -97,7 +97,7 @@ class Drawable {
   }
 }
 
-class PropAnimation {
+class PropertyAnimation {
   start;
   target;
   duration;
@@ -260,7 +260,6 @@ class SquareShape extends BaseShape {
 
 class RegularPolygonShape extends BaseShape {
   constructor(radius, sides) {
-    const vertices = [];
     const corners = [];
     for (let i = 0;i < sides; i++) {
       const angle = i / sides * 2 * Math.PI;
@@ -269,7 +268,7 @@ class RegularPolygonShape extends BaseShape {
         y: radius * Math.sin(angle)
       }));
     }
-    const totalPerimeter = 2 * Math.PI * radius;
+    const vertices = [];
     for (let i = 0;i < NUM_VERTICES; i++) {
       const t = i / NUM_VERTICES;
       const edgeIndex = Math.floor(t * sides);
@@ -481,6 +480,11 @@ class ShapeRef {
 
 class Scene {
   shapes = [];
+  mediaRecorder = null;
+  recordedChunks = [];
+  recordingStartTime = null;
+  recordingDuration = null;
+  recordingTimeout = null;
   F(fun) {
     const shape = new FShape(fun);
     this.shapes.push(shape);
@@ -527,7 +531,7 @@ class Scene {
       return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.translation = new PropAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now());
+        shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now());
       } else {
         shape.translation = new Vec2({ x, y });
         shape.animations.translation = null;
@@ -540,7 +544,7 @@ class Scene {
       return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.scale = new PropAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now());
+        shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now());
       } else {
         shape.scale = new Vec2({ x: sx, y: sy });
         shape.animations.scale = null;
@@ -553,7 +557,7 @@ class Scene {
       return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.rotation = new PropAnimation(shape.rotation, angle, duration, performance.now());
+        shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, performance.now());
       } else {
         shape.rotation = angle;
         shape.animations.rotation = null;
@@ -583,6 +587,60 @@ class Scene {
       this.shapes[idx].active = false;
     }
   }
+  startRecording(options = {}) {
+    if (this.mediaRecorder) {
+      console.warn("Recording already in progress.");
+      return;
+    }
+    const fps = options.fps ?? 30;
+    const mimeType = options.mimeType ?? "video/webm;codecs=vp9";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      console.warn(`MIME type ${mimeType} not supported, falling back to video/webm`);
+    }
+    const actualMimeType = MediaRecorder.isTypeSupported(mimeType) ? mimeType : "video/webm";
+    const stream = canvas.captureStream(fps);
+    this.mediaRecorder = new MediaRecorder(stream, { mimeType: actualMimeType });
+    this.recordedChunks = [];
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+    this.mediaRecorder.onstop = () => {
+      const blob = new Blob(this.recordedChunks, { type: this.mediaRecorder?.mimeType || "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `recording-${Date.now()}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.mediaRecorder = null;
+      this.recordedChunks = [];
+      this.recordingStartTime = null;
+      this.recordingDuration = null;
+      if (this.recordingTimeout) {
+        clearTimeout(this.recordingTimeout);
+        this.recordingTimeout = null;
+      }
+    };
+    this.mediaRecorder.start();
+    this.recordingStartTime = performance.now();
+    this.recordingDuration = options.duration ?? null;
+    if (options.duration) {
+      this.recordingTimeout = window.setTimeout(() => {
+        this.stopRecording();
+      }, options.duration * 1000);
+    }
+    console.log(`Recording started at ${fps} fps${options.duration ? ` for ${options.duration} seconds` : ""}`);
+  }
+  stopRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      this.mediaRecorder.stop();
+    }
+  }
+  async wait(seconds) {
+    return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  }
   update(now) {
     for (const shape of this.shapes) {
       if (shape instanceof BaseShape && shape.active) {
@@ -611,6 +669,12 @@ class Scene {
   animate(now) {
     this.update(now);
     this.draw();
+    if (this.mediaRecorder && this.recordingStartTime && this.recordingDuration) {
+      const elapsed = (now - this.recordingStartTime) / 1000;
+      if (elapsed >= this.recordingDuration) {
+        this.stopRecording();
+      }
+    }
   }
 }
 var scene = new Scene;

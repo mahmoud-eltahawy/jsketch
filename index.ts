@@ -1,7 +1,6 @@
-
 // utils.ts
 
-// ----- Linear interpolation (defined before Color) -----
+// ----- Linear interpolation -----
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 class Color {
@@ -141,8 +140,8 @@ abstract class Drawable {
   abstract draw(): void;
 }
 
-// ----- Helper class for animated properties -----
-class PropAnimation<T> {
+// ----- Helper class for animated properties (renamed to avoid conflict with Web API) -----
+class PropertyAnimation<T> {
   start: T;
   target: T;
   duration: number;
@@ -155,18 +154,16 @@ class PropAnimation<T> {
     this.startTime = startTime;
   }
 
-  // Returns the current interpolated value, or null if finished
+  // Returns the current interpolated value, or the target if finished
   value(now: number): T {
     const elapsed = now - this.startTime;
     if (elapsed >= this.duration) {
-      return this.target; // animation complete
+      return this.target;
     }
     const t = elapsed / this.duration;
     if (this.start instanceof Vec2 && this.target instanceof Vec2) {
-      // TypeScript can't infer that T is Vec2 here, so we use a type guard
       return (this.start as Vec2).lerp(this.target as Vec2, t) as T;
     } else {
-      // number (for rotation)
       return lerp(this.start as number, this.target as number, t) as T;
     }
   }
@@ -178,9 +175,9 @@ class PropAnimation<T> {
 
 // ----- Base class for all shapes (common properties and drawing logic) -----
 interface Animations {
-  translation: PropAnimation<Vec2> | null;
-  scale: PropAnimation<Vec2> | null;
-  rotation: PropAnimation<number> | null;
+  translation: PropertyAnimation<Vec2> | null;
+  scale: PropertyAnimation<Vec2> | null;
+  rotation: PropertyAnimation<number> | null;
 }
 
 abstract class BaseShape extends Drawable {
@@ -337,8 +334,7 @@ class SquareShape extends BaseShape {
 
 class RegularPolygonShape extends BaseShape {
   constructor(radius: number, sides: number) {
-    const vertices: Vec2[] = [];
-    // Precompute the corner points of the polygon
+    // Precompute corner points
     const corners: Vec2[] = [];
     for (let i = 0; i < sides; i++) {
       const angle = (i / sides) * 2 * Math.PI;
@@ -347,13 +343,10 @@ class RegularPolygonShape extends BaseShape {
         y: radius * Math.sin(angle)
       }));
     }
-    // Distribute NUM_VERTICES points along the edges
-    const totalPerimeter = 2 * Math.PI * radius; // approximate, but exact for circle; for polygon it's 2 * radius * sides * sin(pi/sides) but we can just distribute by angle proportion
-    // Simpler: distribute points by equal angular steps, but that will still smooth the polygon.
-    // To get sharp corners, we need to place points along each edge.
+    // Distribute NUM_VERTICES points along edges
+    const vertices: Vec2[] = [];
     for (let i = 0; i < NUM_VERTICES; i++) {
       const t = i / NUM_VERTICES; // 0 to 1 (exclusive of 1)
-      // Determine which edge we are on
       const edgeIndex = Math.floor(t * sides);
       const edgeT = (t * sides) - edgeIndex; // 0..1 along the edge
       const p1 = corners[edgeIndex % sides];
@@ -446,7 +439,7 @@ class MorphShape extends Drawable {
   draw(): void {
     if (!this.active) return;
 
-    const shape1 = this.shapes[this.idx1] as BaseShape; // assume they are BaseShape
+    const shape1 = this.shapes[this.idx1] as BaseShape;
     const shape2 = this.shapes[this.idx2] as BaseShape;
     if (!shape1 || !shape2) return;
 
@@ -592,45 +585,46 @@ class ShapeRef {
     this.index = index;
   }
 
-  // Translation with optional duration (ms)
   translate(x: number, y: number, duration = 0): this {
     this.scene.translate(this.index, x, y, duration);
     return this;
   }
 
-  // Scale with optional duration
   scale(sx: number, sy: number = sx, duration = 0): this {
     this.scene.scale(this.index, sx, sy, duration);
     return this;
   }
 
-  // Rotate (radians) with optional duration
   rotate(angle: number, duration = 0): this {
     this.scene.rotate(this.index, angle, duration);
     return this;
   }
 
-  // Start the segment‑reveal animation
   reveal(): this {
     this.scene.reveal(this.index);
     return this;
   }
 
-  // Morph this shape into another shape (returns a new ShapeRef for the morph)
   morph(otherRef: ShapeRef, duration = ANIMATION_DURATION): ShapeRef {
     const morphIndex = this.scene.morph(this.index, otherRef.index, duration);
     return new ShapeRef(this.scene, morphIndex);
   }
 
-  // Remove (deactivate) this shape
   remove(): void {
     this.scene.remove(this.index);
   }
 }
 
-// ==================== SCENE CLASS ====================
+// ==================== SCENE CLASS (with MediaRecorder) ====================
 class Scene {
   shapes: Drawable[] = [];
+
+  // Recording state
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
+  private recordingStartTime: number | null = null;
+  private recordingDuration: number | null = null;
+  private recordingTimeout: number | null = null;
 
   // ----- Shape factories (return ShapeRef) -----
   F(fun: (x: number) => number): ShapeRef {
@@ -687,7 +681,7 @@ class Scene {
     if (!shape) return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.translation = new PropAnimation<Vec2>(
+        shape.animations.translation = new PropertyAnimation<Vec2>(
           shape.translation,
           new Vec2({ x, y }),
           duration,
@@ -705,7 +699,7 @@ class Scene {
     if (!shape) return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.scale = new PropAnimation<Vec2>(
+        shape.animations.scale = new PropertyAnimation<Vec2>(
           shape.scale,
           new Vec2({ x: sx, y: sy }),
           duration,
@@ -723,7 +717,7 @@ class Scene {
     if (!shape) return;
     if (shape instanceof BaseShape) {
       if (duration > 0) {
-        shape.animations.rotation = new PropAnimation<number>(
+        shape.animations.rotation = new PropertyAnimation<number>(
           shape.rotation,
           angle,
           duration,
@@ -761,7 +755,81 @@ class Scene {
   // ----- Remove (deactivate) a shape by index -----
   remove(idx: number): void {
     if (idx >= 0 && idx < this.shapes.length) {
-      this.shapes[idx].active = false; // just deactivate, keep index stable
+      this.shapes[idx].active = false;
+    }
+  }
+
+  // ----- Recording -----
+  /**
+   * Starts recording the canvas as a video.
+   * @param options.fps - Frames per second (default 30)
+   * @param options.duration - Recording duration in seconds (if not provided, record until stop() is called)
+   * @param options.mimeType - MIME type for the video (e.g., 'video/webm;codecs=vp9')
+   */
+  startRecording(options: { fps?: number; duration?: number; mimeType?: string } = {}): void {
+    if (this.mediaRecorder) {
+      console.warn('Recording already in progress.');
+      return;
+    }
+
+    const fps = options.fps ?? 30;
+    const mimeType = options.mimeType ?? 'video/webm;codecs=vp9';
+
+    // Check MIME type support
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      console.warn(`MIME type ${mimeType} not supported, falling back to video/webm`);
+    }
+    const actualMimeType = MediaRecorder.isTypeSupported(mimeType) ? mimeType : 'video/webm';
+
+    const stream = canvas.captureStream(fps);
+    this.mediaRecorder = new MediaRecorder(stream, { mimeType: actualMimeType });
+    this.recordedChunks = [];
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = () => {
+      const blob = new Blob(this.recordedChunks, { type: this.mediaRecorder?.mimeType || 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `recording-${Date.now()}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // Clean up
+      this.mediaRecorder = null;
+      this.recordedChunks = [];
+      this.recordingStartTime = null;
+      this.recordingDuration = null;
+      if (this.recordingTimeout) {
+        clearTimeout(this.recordingTimeout);
+        this.recordingTimeout = null;
+      }
+    };
+
+    this.mediaRecorder.start();
+    this.recordingStartTime = performance.now();
+    this.recordingDuration = options.duration ?? null;
+
+    if (options.duration) {
+      this.recordingTimeout = window.setTimeout(() => {
+        this.stopRecording();
+      }, options.duration * 1000);
+    }
+
+    console.log(`Recording started at ${fps} fps${options.duration ? ` for ${options.duration} seconds` : ''}`);
+  }
+
+  /**
+   * Stops the current recording and downloads the video.
+   */
+  stopRecording(): void {
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
     }
   }
 
@@ -798,24 +866,29 @@ class Scene {
     }
   }
 
-  // ----- Animation loop entry point -----
+  // ----- Animation loop entry point (called by requestAnimationFrame) -----
   animate(now: number): void {
     this.update(now);
     this.draw();
+
+    // Check if we need to auto-stop based on elapsed time (in case setTimeout is delayed)
+    if (this.mediaRecorder && this.recordingStartTime && this.recordingDuration) {
+      const elapsed = (now - this.recordingStartTime) / 1000;
+      if (elapsed >= this.recordingDuration) {
+        this.stopRecording();
+      }
+    }
   }
 }
 
 // ==================== GLOBAL SETUP ====================
-// Create a default scene (you can also create multiple scenes)
 const scene = new Scene();
 
-// Animation loop
 function animate(): void {
   scene.animate(performance.now());
   requestAnimationFrame(animate);
 }
 
-// Initialisation
 function main(): void {
   gridLevel = 3;
   resize();
@@ -823,5 +896,5 @@ function main(): void {
 }
 main();
 
-// Expose scene to console for interactive use
+// Expose scene to console
 (window as any).scene = scene;
