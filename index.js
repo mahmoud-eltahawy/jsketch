@@ -121,6 +121,7 @@ class Drawable {
     if (this.constructor === Drawable) {
       throw new Error("Drawable is an abstract class and cannot be instantiated directly.");
     }
+    this.active = true; // all drawables start active
   }
 
   draw() {
@@ -152,6 +153,8 @@ class BaseShape extends Drawable {
 
   // Draw all segments up to current progress, applying scale → rotate → translate
   draw() {
+    if (!this.active) return; // skip if inactive
+
     // Helper to transform a vertex
     const getTransformed = (v) => {
       const scaled = new Vec2({ x: v.x * this.scale.x, y: v.y * this.scale.y });
@@ -239,13 +242,15 @@ class MorphShape extends Drawable {
     this.duration = duration;
     this.pointSize = 2;              // could be averaged, but kept constant
     this.animationStart = performance.now();
-    this.finished = false;
+    // No finished flag – we'll use active to control visibility
   }
 
   draw() {
+    if (!this.active) return; // skip if inactive
+
     const shape1 = shapes[this.idx1];
     const shape2 = shapes[this.idx2];
-    if (!shape1 || !shape2) return; // shapes might have been removed
+    if (!shape1 || !shape2) return; // shapes might have been removed (but we never remove, so shouldn't happen)
 
     const now = performance.now();
     const elapsed = now - this.animationStart;
@@ -276,9 +281,16 @@ class MorphShape extends Drawable {
       transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
 
-    // Mark as finished if animation completed
+    // Deactivate when animation completes, unless target shape hasn't started drawing
     if (elapsed >= this.duration) {
-      this.finished = true;
+      const target = shapes[this.idx2];
+      // Keep active if target progress is still 0 (target hasn't started drawing)
+      if (target && target.progress === 0) {
+        // remain active (we'll keep drawing the final state)
+        // Optionally we could freeze at t=1, but we already are at t=1
+      } else {
+        this.active = false; // hide when done and target has started
+      }
     }
   }
 }
@@ -444,9 +456,9 @@ function draw(index) {
 function animate() {
   const now = performance.now();
 
-  // Update progress only for regular shapes (BaseShape instances)
+  // Update progress only for regular shapes (BaseShape instances) that are active
   for (const shape of shapes) {
-    if (shape instanceof BaseShape && shape.animationStart !== null) {
+    if (shape instanceof BaseShape && shape.active && shape.animationStart !== null) {
       const elapsed = now - shape.animationStart;
       const t = Math.min(elapsed, ANIMATION_DURATION);
       const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
@@ -462,18 +474,10 @@ function animate() {
   drawGrid();
 
   for (const shape of shapes) {
-    shape.draw();
-  }
-
-  // Remove finished morph shapes only if their target shape has started drawing
-  shapes = shapes.filter(s => {
-    if (s instanceof MorphShape && s.finished) {
-      const target = shapes[s.idx2];
-      // Keep the morph if the target shape's progress is still 0
-      return target && target.progress === 0;
+    if (shape.active) {
+      shape.draw();
     }
-    return true; // keep all other shapes
-  });
+  }
 
   requestAnimationFrame(animate);
 }
