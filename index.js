@@ -129,6 +129,35 @@ class Drawable {
   }
 }
 
+// ----- Helper class for animated properties -----
+class Animation {
+  constructor(start, target, duration, startTime) {
+    this.start = start;
+    this.target = target;
+    this.duration = duration;
+    this.startTime = startTime;
+  }
+
+  // Returns the current interpolated value, or null if finished
+  value(now) {
+    const elapsed = now - this.startTime;
+    if (elapsed >= this.duration) {
+      return this.target; // animation complete
+    }
+    const t = elapsed / this.duration;
+    if (this.start instanceof Vec2) {
+      return this.start.lerp(this.target, t);
+    } else {
+      // number (for rotation)
+      return lerp(this.start, this.target, t);
+    }
+  }
+
+  isFinished(now) {
+    return now - this.startTime >= this.duration;
+  }
+}
+
 // ----- Base class for all shapes (common properties and drawing logic) -----
 class BaseShape extends Drawable {
   constructor(
@@ -148,7 +177,47 @@ class BaseShape extends Drawable {
     this.scale = new Vec2(scale);             // scaling factors
     this.rotation = rotation;                 // rotation angle in radians
     this.progress = 0;                         // number of vertices to show
-    this.animationStart = null;                // timestamp when animation started
+    this.animationStart = null;                // timestamp when drawing animation started
+
+    // Animation state for transformations
+    this.animations = {
+      translation: null,
+      scale: null,
+      rotation: null,
+    };
+  }
+
+  // Update any active animations based on current time
+  updateAnimations(now) {
+    if (this.animations.translation) {
+      const anim = this.animations.translation;
+      if (anim.isFinished(now)) {
+        this.translation = anim.target;
+        this.animations.translation = null;
+      } else {
+        this.translation = anim.value(now);
+      }
+    }
+
+    if (this.animations.scale) {
+      const anim = this.animations.scale;
+      if (anim.isFinished(now)) {
+        this.scale = anim.target;
+        this.animations.scale = null;
+      } else {
+        this.scale = anim.value(now);
+      }
+    }
+
+    if (this.animations.rotation) {
+      const anim = this.animations.rotation;
+      if (anim.isFinished(now)) {
+        this.rotation = anim.target;
+        this.animations.rotation = null;
+      } else {
+        this.rotation = anim.value(now);
+      }
+    }
   }
 
   // Draw all segments up to current progress, applying scale → rotate → translate
@@ -233,6 +302,79 @@ class SquareShape extends BaseShape {
   }
 }
 
+class RegularPolygonShape extends BaseShape {
+  constructor(radius, sides) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / NUM_VERTICES; // 0 to 1 (exclusive of 1)
+      const angle = t * 2 * Math.PI;
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, true); // closed loop
+  }
+}
+
+class LineShape extends BaseShape {
+  constructor(start, end) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+      const x = lerp(start.x, end.x, t);
+      const y = lerp(start.y, end.y, t);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, false); // open curve (just a line)
+  }
+}
+
+class ParametricCurveShape extends BaseShape {
+  constructor(fx, fy, tMin = 0, tMax = 1) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+      const param = tMin + t * (tMax - tMin);
+      const x = fx(param);
+      const y = fy(param);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, false); // open curve by default (can be closed if parametric curve is closed)
+  }
+}
+
+class StarShape extends BaseShape {
+  constructor(outerRadius, innerRadius, points) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / NUM_VERTICES; // 0 to 1 (exclusive of 1)
+      const angle = t * 2 * Math.PI;
+      // Determine which point of the star we are on (two radii alternating)
+      const sector = Math.floor(angle / (Math.PI / points)); // 0 .. 2*points-1
+      const r = (sector % 2 === 0) ? outerRadius : innerRadius;
+      const x = r * Math.cos(angle);
+      const y = r * Math.sin(angle);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, true); // closed loop
+  }
+}
+
+class SpiralShape extends BaseShape {
+  constructor(maxRadius, turns) {
+    const vertices = [];
+    for (let i = 0; i < NUM_VERTICES; i++) {
+      const t = i / (NUM_VERTICES - 1); // 0 to 1 inclusive
+      const radius = maxRadius * t;
+      const angle = turns * 2 * Math.PI * t;
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      vertices.push(new Vec2({ x, y }));
+    }
+    super(vertices, 2, false); // open curve
+  }
+}
+
 // ----- MorphShape: interpolates between two shapes over time -----
 class MorphShape extends Drawable {
   constructor(idx1, idx2, duration = ANIMATION_DURATION) {
@@ -287,7 +429,6 @@ class MorphShape extends Drawable {
       // Keep active if target progress is still 0 (target hasn't started drawing)
       if (target && target.progress === 0) {
         // remain active (we'll keep drawing the final state)
-        // Optionally we could freeze at t=1, but we already are at t=1
       } else {
         this.active = false; // hide when done and target has started
       }
@@ -389,7 +530,7 @@ function drawGrid() {
   }
 }
 
-// ----- Shape factories (now return instances of specific classes) -----
+// ----- Shape factories -----
 function F(fun) {
   const shape = new FShape(fun);
   shapes.push(shape);
@@ -408,23 +549,90 @@ function Square(sideLength) {
   return shapes.length - 1;
 }
 
-// ----- Shape Actions -----
+function RegularPolygon(radius, sides) {
+  const shape = new RegularPolygonShape(radius, sides);
+  shapes.push(shape);
+  return shapes.length - 1;
+}
 
-// Set absolute translation
-function Translate(idx, x, y) {
-  shapes[idx].translation = new Vec2({ x, y });
+function Line(startX, startY, endX, endY) {
+  const shape = new LineShape({ x: startX, y: startY }, { x: endX, y: endY });
+  shapes.push(shape);
+  return shapes.length - 1;
+}
+
+function ParametricCurve(fx, fy, tMin = 0, tMax = 1) {
+  const shape = new ParametricCurveShape(fx, fy, tMin, tMax);
+  shapes.push(shape);
+  return shapes.length - 1;
+}
+
+function Star(outerRadius, innerRadius, points = 5) {
+  const shape = new StarShape(outerRadius, innerRadius, points);
+  shapes.push(shape);
+  return shapes.length - 1;
+}
+
+function Spiral(maxRadius, turns = 3) {
+  const shape = new SpiralShape(maxRadius, turns);
+  shapes.push(shape);
+  return shapes.length - 1;
+}
+
+// ----- Shape Actions (now with optional animation duration) -----
+
+// Set absolute translation (animated if duration > 0)
+function Translate(idx, x, y, duration = 0) {
+  const shape = shapes[idx];
+  if (!shape) return idx;
+  if (duration > 0) {
+    // Start animation from current value
+    shape.animations.translation = new Animation(
+      shape.translation,
+      new Vec2({ x, y }),
+      duration,
+      performance.now()
+    );
+  } else {
+    shape.translation = new Vec2({ x, y });
+    shape.animations.translation = null; // cancel any ongoing animation
+  }
   return idx;
 }
 
-// Set absolute scale (uniform or separate x,y)
-function Scale(idx, sx, sy = sx) {
-  shapes[idx].scale = new Vec2({ x: sx, y: sy });
+// Set absolute scale (uniform or separate x,y) – animated if duration > 0
+function Scale(idx, sx, sy = sx, duration = 0) {
+  const shape = shapes[idx];
+  if (!shape) return idx;
+  if (duration > 0) {
+    shape.animations.scale = new Animation(
+      shape.scale,
+      new Vec2({ x: sx, y: sy }),
+      duration,
+      performance.now()
+    );
+  } else {
+    shape.scale = new Vec2({ x: sx, y: sy });
+    shape.animations.scale = null;
+  }
   return idx;
 }
 
-// Set absolute rotation (in radians)
-function Rotate(idx, angle) {
-  shapes[idx].rotation = angle;
+// Set absolute rotation (in radians) – animated if duration > 0
+function Rotate(idx, angle, duration = 0) {
+  const shape = shapes[idx];
+  if (!shape) return idx;
+  if (duration > 0) {
+    shape.animations.rotation = new Animation(
+      shape.rotation,
+      angle,
+      duration,
+      performance.now()
+    );
+  } else {
+    shape.rotation = angle;
+    shape.animations.rotation = null;
+  }
   return idx;
 }
 
@@ -456,17 +664,22 @@ function draw(index) {
 function animate() {
   const now = performance.now();
 
-  // Update progress only for regular shapes (BaseShape instances) that are active
+  // Update progress and animations for regular shapes (BaseShape instances)
   for (const shape of shapes) {
-    if (shape instanceof BaseShape && shape.active && shape.animationStart !== null) {
-      const elapsed = now - shape.animationStart;
-      const t = Math.min(elapsed, ANIMATION_DURATION);
-      const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
-      shape.progress = Math.min(targetProgress, shape.vertices.length);
+    if (shape instanceof BaseShape && shape.active) {
+      // Update drawing progress
+      if (shape.animationStart !== null) {
+        const elapsed = now - shape.animationStart;
+        const t = Math.min(elapsed, ANIMATION_DURATION);
+        const targetProgress = Math.floor((t / ANIMATION_DURATION) * shape.vertices.length);
+        shape.progress = Math.min(targetProgress, shape.vertices.length);
 
-      if (elapsed >= ANIMATION_DURATION) {
-        shape.animationStart = null;
+        if (elapsed >= ANIMATION_DURATION) {
+          shape.animationStart = null;
+        }
       }
+      // Update transformation animations
+      shape.updateAnimations(now);
     }
   }
 
