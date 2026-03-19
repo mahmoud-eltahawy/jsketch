@@ -482,11 +482,7 @@ function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number):
     dist.push(dist[i-1] + Math.sqrt(dx*dx + dy*dy));
   }
   if (closed) {
-    // Add closing segment distance
-    let dx = vertices[0].x - vertices[vertices.length-1].x;
-    let dy = vertices[0].y - vertices[vertices.length-1].y;
-    const closingDist = Math.sqrt(dx*dx + dy*dy);
-    // We'll sample along the perimeter including the closing edge.
+    // Sample along the perimeter including the closing edge.
     const segments: { start: Vec2; end: Vec2; len: number; cum: number }[] = [];
     let total = 0;
     for (let i = 0; i < vertices.length - 1; i++) {
@@ -497,8 +493,8 @@ function resamplePolyline(vertices: Vec2[], closed: boolean, numPoints: number):
       total += len;
     }
     // closing segment
-    dx = vertices[0].x - vertices[vertices.length-1].x;
-    dy = vertices[0].y - vertices[vertices.length-1].y;
+    const dx = vertices[0].x - vertices[vertices.length-1].x;
+    const dy = vertices[0].y - vertices[vertices.length-1].y;
     const len = Math.sqrt(dx*dx + dy*dy);
     segments.push({ start: vertices[vertices.length-1], end: vertices[0], len, cum: total + len });
     total += len;

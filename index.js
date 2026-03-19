@@ -385,9 +385,6 @@ function resamplePolyline(vertices, closed, numPoints) {
     dist.push(dist[i - 1] + Math.sqrt(dx * dx + dy * dy));
   }
   if (closed) {
-    let dx = vertices[0].x - vertices[vertices.length - 1].x;
-    let dy = vertices[0].y - vertices[vertices.length - 1].y;
-    const closingDist = Math.sqrt(dx * dx + dy * dy);
     const segments = [];
     let total = 0;
     for (let i = 0;i < vertices.length - 1; i++) {
@@ -397,8 +394,8 @@ function resamplePolyline(vertices, closed, numPoints) {
       segments.push({ start: vertices[i], end: vertices[i + 1], len: len2, cum: total + len2 });
       total += len2;
     }
-    dx = vertices[0].x - vertices[vertices.length - 1].x;
-    dy = vertices[0].y - vertices[vertices.length - 1].y;
+    const dx = vertices[0].x - vertices[vertices.length - 1].x;
+    const dy = vertices[0].y - vertices[vertices.length - 1].y;
     const len = Math.sqrt(dx * dx + dy * dy);
     segments.push({ start: vertices[vertices.length - 1], end: vertices[0], len, cum: total + len });
     total += len;
