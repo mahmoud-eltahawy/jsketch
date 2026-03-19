@@ -1,6 +1,6 @@
 // utils.ts
 
-// ----- Linear interpolation (defined before Color so it's available) -----
+// ----- Linear interpolation (defined before Color) -----
 const lerp = (a, b, t) => a + (b - a) * t;
 
 class Color {
@@ -145,7 +145,7 @@ class Shape {
       return rotated.add(this.translation);
     };
 
-    const colorStr = this.color.toString(); // convert once
+    const colorStr = this.color.toString();
 
     for (let i = 0; i < this.progress - 1; i++) {
       const a = getTransformed(this.vertices[i]);
@@ -163,47 +163,36 @@ class Shape {
 
 // ----- MorphShape: interpolates between two shapes over time -----
 class MorphShape {
-  constructor(shape1, shape2, duration = ANIMATION_DURATION) {
-    // Capture a snapshot of both shapes (vertices and transforms)
-    this.shape1 = {
-      vertices: shape1.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
-      translation: new Vec2({ x: shape1.translation.x, y: shape1.translation.y }),
-      scale: new Vec2({ x: shape1.scale.x, y: shape1.scale.y }),
-      rotation: shape1.rotation,
-      color: shape1.color,
-    };
-    this.shape2 = {
-      vertices: shape2.vertices.map(v => new Vec2({ x: v.x, y: v.y })),
-      translation: new Vec2({ x: shape2.translation.x, y: shape2.translation.y }),
-      scale: new Vec2({ x: shape2.scale.x, y: shape2.scale.y }),
-      rotation: shape2.rotation,
-      color: shape2.color,
-    };
+  constructor(idx1, idx2, duration = ANIMATION_DURATION) {
+    this.idx1 = idx1;               // index of first shape
+    this.idx2 = idx2;               // index of second shape (target)
     this.duration = duration;
-    this.pointSize = 2; // could also average point sizes
-    this.closed = shape1.closed; // assume same closed state (or use shape1's)
-    this.animationStart = performance.now(); // start immediately
-    this.finished = false; // becomes true when morph completes
+    this.pointSize = 2;              // could be averaged, but kept constant
+    this.animationStart = performance.now();
+    this.finished = false;
   }
 
   draw() {
+    const shape1 = shapes[this.idx1];
+    const shape2 = shapes[this.idx2];
+    if (!shape1 || !shape2) return; // shapes might have been removed
+
     const now = performance.now();
     const elapsed = now - this.animationStart;
     const t = Math.min(elapsed / this.duration, 1);
 
-    // Interpolate transforms
-    const trans = this.shape1.translation.lerp(this.shape2.translation, t);
-    const scale = this.shape1.scale.lerp(this.shape2.scale, t);
-    const rot = lerp(this.shape1.rotation, this.shape2.rotation, t);
-    // Interpolate color
-    const color = this.shape1.color.lerp(this.shape2.color, t);
+    // Interpolate transforms and colors directly from current shape properties
+    const trans = shape1.translation.lerp(shape2.translation, t);
+    const scale = shape1.scale.lerp(shape2.scale, t);
+    const rot = lerp(shape1.rotation, shape2.rotation, t);
+    const color = shape1.color.lerp(shape2.color, t);
     const colorStr = color.toString();
 
-    // Interpolate and transform all vertices
-    const count = this.shape1.vertices.length; // same as shape2
+    // Interpolate vertices (base vertices are static)
+    const count = shape1.vertices.length; // same as shape2
     const transformed = [];
     for (let i = 0; i < count; i++) {
-      const v = this.shape1.vertices[i].lerp(this.shape2.vertices[i], t);
+      const v = shape1.vertices[i].lerp(shape2.vertices[i], t);
       const scaled = new Vec2({ x: v.x * scale.x, y: v.y * scale.y });
       const rotated = scaled.rotate(rot);
       transformed.push(rotated.add(trans));
@@ -213,7 +202,7 @@ class MorphShape {
     for (let i = 0; i < count - 1; i++) {
       transformed[i].drawLineTo(transformed[i + 1], this.pointSize, colorStr);
     }
-    if (this.closed) {
+    if (shape1.closed) { // assume both have same closed state
       transformed[count - 1].drawLineTo(transformed[0], this.pointSize, colorStr);
     }
 
@@ -395,14 +384,12 @@ function Rotate(idx, angle) {
 
 // ----- Morph: create a shape that interpolates between two shapes -----
 function Morph(idx1, idx2, duration = ANIMATION_DURATION) {
-  const shape1 = shapes[idx1];
-  const shape2 = shapes[idx2];
-  if (!shape1 || !shape2) {
+  if (!shapes[idx1] || !shapes[idx2]) {
     throw new Error(`Invalid shape indices: ${idx1}, ${idx2}`);
   }
-  const morph = new MorphShape(shape1, shape2, duration);
+  const morph = new MorphShape(idx1, idx2, duration);
   shapes.push(morph);
-  return shapes.length - 1; // index of the morph shape
+  return shapes.length - 1;
 }
 
 // ----- Animation control for regular shapes (segment reveal) -----
@@ -441,11 +428,18 @@ function animate() {
   drawGrid();
 
   for (const shape of shapes) {
-    shape.draw(); // MorphShape also has a draw method
+    shape.draw();
   }
 
-  // Remove finished morph shapes
-  shapes = shapes.filter(s => !s.finished);
+  // Remove finished morph shapes only if their target shape has started drawing
+  shapes = shapes.filter(s => {
+    if (s instanceof MorphShape && s.finished) {
+      const target = shapes[s.idx2];
+      // Keep the morph if the target shape's progress is still 0
+      return target && target.progress === 0;
+    }
+    return true; // keep all other shapes
+  });
 
   requestAnimationFrame(animate);
 }
