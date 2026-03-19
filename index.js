@@ -36,6 +36,12 @@ var ctx = canvas.getContext("2d");
 var _gridLevel = 3;
 var gridDirty = true;
 function setGridLevel(level) {
+  if (level !== null) {
+    if (typeof level !== "number" || level < 1 || level > 3) {
+      console.warn("gridLevel must be 1, 2, 3, or null. Clamping to 1-3.");
+      level = Math.min(3, Math.max(1, Math.floor(level)));
+    }
+  }
   _gridLevel = level;
   gridDirty = true;
 }
@@ -100,6 +106,7 @@ class Drawable {
       throw new Error("Drawable is an abstract class and cannot be instantiated directly.");
     }
   }
+  update(_now) {}
 }
 
 class PropertyAnimation {
@@ -175,10 +182,7 @@ class BaseShape extends Drawable {
       rotation: null,
       strokeColor: null,
       fillColor: null,
-      opacity: null,
-      lineDash: null,
-      lineCap: null,
-      lineJoin: null
+      opacity: null
     };
     this.revealDuration = ANIMATION_DURATION;
     this.vertexColors = null;
@@ -567,14 +571,25 @@ class MorphShape extends Drawable {
     this.id2 = id2;
     this.duration = duration;
     this.pointSize = 2;
-    this.animationStart = performance.now();
+    this.animationStart = scene.currentEffectiveTime();
+  }
+  update(now) {
+    const shape1 = this.scene.getShape(this.id1);
+    const shape2 = this.scene.getShape(this.id2);
+    if (!shape1?.active || !shape2?.active) {
+      this.scene.markForRemoval(this.id);
+      return;
+    }
+    if (now - this.animationStart >= this.duration) {
+      this.scene.markForRemoval(this.id);
+    }
   }
   draw() {
     if (!this.active)
       return;
     const shape1 = this.scene.getShape(this.id1);
     const shape2 = this.scene.getShape(this.id2);
-    if (!shape1 || !shape2 || !shape1.active || !shape2.active)
+    if (!shape1?.active || !shape2?.active)
       return;
     if (!(shape1 instanceof BaseShape) || !(shape2 instanceof BaseShape)) {
       console.warn("MorphShape only supports BaseShape sources.");
@@ -583,13 +598,12 @@ class MorphShape extends Drawable {
     const count = Math.max(shape1.vertices.length, shape2.vertices.length);
     const resampled1 = resamplePolyline(shape1.vertices, shape1.closed, count);
     const resampled2 = resamplePolyline(shape2.vertices, shape2.closed, count);
-    const now = performance.now();
+    const now = this.scene.currentEffectiveTime();
     const elapsed = now - this.animationStart;
-    let t = elapsed / this.duration;
-    if (this.duration <= 0)
-      t = 1;
-    else
-      t = Math.min(t, 1);
+    let t = 1;
+    if (this.duration > 0) {
+      t = Math.min(elapsed / this.duration, 1);
+    }
     const trans = shape1.translation.lerp(shape2.translation, t);
     const scale = shape1.scale.lerp(shape2.scale, t);
     const rot = lerp(shape1.rotation, shape2.rotation, t);
@@ -621,10 +635,6 @@ class MorphShape extends Drawable {
       ctx.fill(path);
     ctx.stroke(path);
     ctx.restore();
-    if (elapsed >= this.duration) {
-      this.active = false;
-      this.scene.remove(this.id);
-    }
   }
 }
 function boxSize() {
@@ -635,7 +645,7 @@ function resize() {
   canvas.width = s;
   canvas.height = s;
   gridDirty = true;
-  if (window.scene) {
+  if (window.scene && typeof window.scene.invalidateAllTransforms === "function") {
     window.scene.invalidateAllTransforms();
   }
 }
@@ -753,24 +763,24 @@ class ShapeRef {
     this.scene.opacity(this.id, value, duration);
     return this;
   }
-  lineDash(dashArray, duration = 0) {
-    this.scene.lineDash(this.id, dashArray, duration);
+  lineDash(dashArray, _duration = 0) {
+    this.scene.lineDash(this.id, dashArray);
     return this;
   }
-  lineCap(cap, duration = 0) {
-    this.scene.lineCap(this.id, cap, duration);
+  lineCap(cap, _duration = 0) {
+    this.scene.lineCap(this.id, cap);
     return this;
   }
-  lineJoin(join, duration = 0) {
-    this.scene.lineJoin(this.id, join, duration);
+  lineJoin(join, _duration = 0) {
+    this.scene.lineJoin(this.id, join);
     return this;
   }
-  vertexColors(colors, duration = 0) {
+  vertexColors(colors, _duration = 0) {
     if (colors === null) {
-      this.scene.vertexColors(this.id, null, duration);
+      this.scene.vertexColors(this.id, null);
     } else {
       const cols = colors.map((c) => typeof c === "string" ? parseColor(c) : c);
-      this.scene.vertexColors(this.id, cols, duration);
+      this.scene.vertexColors(this.id, cols);
     }
     return this;
   }
@@ -828,16 +838,26 @@ function parseColor(str) {
 class Scene {
   shapes = new Map;
   nextId = 0;
+  removalSet = new Set;
+  pauseStartReal = null;
+  pauseDuration = null;
+  effectiveTimeAtPauseStart = null;
+  totalPausedTime = 0;
   mediaRecorder = null;
   recordedChunks = [];
   recordingStartTime = null;
   recordingDuration = null;
   recordingTimeout = null;
-  pauseStart = null;
-  pauseDuration = null;
-  totalPausedTime = 0;
   getShape(id) {
     return this.shapes.get(id);
+  }
+  currentEffectiveTime() {
+    const now = performance.now();
+    if (this.pauseStartReal !== null) {
+      return this.effectiveTimeAtPauseStart;
+    } else {
+      return now - this.totalPausedTime;
+    }
   }
   invalidateAllTransforms() {
     for (const shape of this.shapes.values()) {
@@ -899,7 +919,7 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0) {
-      shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, performance.now() - this.totalPausedTime);
+      shape.animations.translation = new PropertyAnimation(shape.translation, new Vec2({ x, y }), duration, this.currentEffectiveTime());
     } else {
       shape.translation = new Vec2({ x, y });
       shape.animations.translation = null;
@@ -910,7 +930,7 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0) {
-      shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, performance.now() - this.totalPausedTime);
+      shape.animations.scale = new PropertyAnimation(shape.scale, new Vec2({ x: sx, y: sy }), duration, this.currentEffectiveTime());
     } else {
       shape.scale = new Vec2({ x: sx, y: sy });
       shape.animations.scale = null;
@@ -921,7 +941,7 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0) {
-      shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, performance.now() - this.totalPausedTime);
+      shape.animations.rotation = new PropertyAnimation(shape.rotation, angle, duration, this.currentEffectiveTime());
     } else {
       shape.rotation = angle;
       shape.animations.rotation = null;
@@ -932,7 +952,7 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0) {
-      shape.animations.strokeColor = new PropertyAnimation(shape.strokeColor, color, duration, performance.now() - this.totalPausedTime);
+      shape.animations.strokeColor = new PropertyAnimation(shape.strokeColor, color, duration, this.currentEffectiveTime());
     } else {
       shape.strokeColor = color;
       shape.animations.strokeColor = null;
@@ -943,7 +963,7 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0 && color !== null) {
-      shape.animations.fillColor = new PropertyAnimation(shape.fillColor || new Color(0, 0, 0, 0), color, duration, performance.now() - this.totalPausedTime);
+      shape.animations.fillColor = new PropertyAnimation(shape.fillColor || new Color(0, 0, 0, 0), color, duration, this.currentEffectiveTime());
     } else {
       shape.fillColor = color;
       shape.animations.fillColor = null;
@@ -954,31 +974,31 @@ class Scene {
     if (!shape || !(shape instanceof BaseShape))
       return;
     if (duration > 0) {
-      shape.animations.opacity = new PropertyAnimation(shape.opacity, value, duration, performance.now() - this.totalPausedTime);
+      shape.animations.opacity = new PropertyAnimation(shape.opacity, value, duration, this.currentEffectiveTime());
     } else {
       shape.opacity = value;
       shape.animations.opacity = null;
     }
   }
-  lineDash(id, dashArray, duration = 0) {
+  lineDash(id, dashArray) {
     const shape = this.shapes.get(id);
     if (!shape || !(shape instanceof BaseShape))
       return;
     shape.lineDash = dashArray;
   }
-  lineCap(id, cap, duration = 0) {
+  lineCap(id, cap) {
     const shape = this.shapes.get(id);
     if (!shape || !(shape instanceof BaseShape))
       return;
     shape.lineCap = cap;
   }
-  lineJoin(id, join, duration = 0) {
+  lineJoin(id, join) {
     const shape = this.shapes.get(id);
     if (!shape || !(shape instanceof BaseShape))
       return;
     shape.lineJoin = join;
   }
-  vertexColors(id, colors, duration = 0) {
+  vertexColors(id, colors) {
     const shape = this.shapes.get(id);
     if (!shape || !(shape instanceof BaseShape))
       return;
@@ -990,7 +1010,6 @@ class Scene {
     }
     const morphId = this.nextId++;
     const morph = new MorphShape(morphId, this, id1, id2, duration);
-    morph.animationStart -= this.totalPausedTime;
     this.shapes.set(morphId, morph);
     return morphId;
   }
@@ -999,17 +1018,30 @@ class Scene {
     if (!shape)
       throw new Error(`Shape with id ${id} does not exist.`);
     if (shape instanceof BaseShape) {
-      shape.animationStart = performance.now() - this.totalPausedTime;
+      shape.animationStart = this.currentEffectiveTime();
       shape.progress = 0;
       shape.revealDuration = duration;
     }
   }
   remove(id) {
-    this.shapes.delete(id);
+    this.removalSet.add(id);
+  }
+  markForRemoval(id) {
+    this.removalSet.add(id);
   }
   wait(seconds) {
-    this.pauseStart = performance.now();
+    const now = performance.now();
+    if (this.pauseStartReal !== null) {
+      const elapsed = now - this.pauseStartReal;
+      const actual = Math.min(elapsed, this.pauseDuration);
+      this.totalPausedTime += actual;
+      this.pauseStartReal = null;
+      this.pauseDuration = null;
+      this.effectiveTimeAtPauseStart = null;
+    }
+    this.pauseStartReal = now;
     this.pauseDuration = seconds * 1000;
+    this.effectiveTimeAtPauseStart = now - this.totalPausedTime;
     return this;
   }
   startRecording(options = {}) {
@@ -1064,39 +1096,22 @@ class Scene {
     }
   }
   update(now) {
-    if (this.pauseStart !== null && this.pauseDuration !== null) {
-      const elapsedPause = now - this.pauseStart;
+    if (this.pauseStartReal !== null) {
+      const elapsedPause = now - this.pauseStartReal;
       if (elapsedPause < this.pauseDuration) {
         return;
       } else {
         const actualPause = Math.min(elapsedPause, this.pauseDuration);
         this.totalPausedTime += actualPause;
-        for (const shape of this.shapes.values()) {
-          if (shape instanceof BaseShape) {
-            if (shape.animationStart !== null) {
-              shape.animationStart += actualPause;
-            }
-            if (shape.animations.translation)
-              shape.animations.translation.startTime += actualPause;
-            if (shape.animations.scale)
-              shape.animations.scale.startTime += actualPause;
-            if (shape.animations.rotation)
-              shape.animations.rotation.startTime += actualPause;
-            if (shape.animations.strokeColor)
-              shape.animations.strokeColor.startTime += actualPause;
-            if (shape.animations.fillColor)
-              shape.animations.fillColor.startTime += actualPause;
-            if (shape.animations.opacity)
-              shape.animations.opacity.startTime += actualPause;
-          } else if (shape instanceof MorphShape) {
-            shape.animationStart += actualPause;
-          }
-        }
-        this.pauseStart = null;
+        this.pauseStartReal = null;
         this.pauseDuration = null;
+        this.effectiveTimeAtPauseStart = null;
       }
     }
     const effectiveNow = now - this.totalPausedTime;
+    for (const shape of this.shapes.values()) {
+      shape.update(effectiveNow);
+    }
     for (const shape of this.shapes.values()) {
       if (shape instanceof BaseShape && shape.active) {
         if (shape.animationStart !== null) {
@@ -1111,6 +1126,10 @@ class Scene {
         shape.updateAnimations(effectiveNow);
       }
     }
+    for (const id of this.removalSet) {
+      this.shapes.delete(id);
+    }
+    this.removalSet.clear();
   }
   draw() {
     clearBackground();
