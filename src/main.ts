@@ -1,6 +1,6 @@
+
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { Recorder, RecorderStatus } from "canvas-record";
 
 // ========== Configuration ==========
@@ -10,6 +10,9 @@ const CONFIG = {
   scaleZ: 10,
   defaultLineWidth: 2,
   defaultFont: "14px sans-serif",
+  defaultTextColor: "#ffffff",
+  defaultBackground: "transparent",
+  spriteSize: 1, // default size for text/image sprites
 };
 
 const NUM_VERTICES = 400;
@@ -433,13 +436,19 @@ class GenericShape extends BaseShape {
   }
 }
 
-// ========== CSS2D Shape ==========
-class CSS2DShape extends Drawable {
-  private element: HTMLElement;
-  private label: CSS2DObject;
+// ========== WebGL Sprite Shape (text/image) ==========
+class WebGLSpriteShape extends Drawable {
+  private sprite: THREE.Sprite;
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private texture: THREE.CanvasTexture;
+  private _content: string | HTMLImageElement;
+  private _font: string;
   private _strokeColor: THREE.Color;
   private _fillColor: THREE.Color | null;
   private _opacity: number;
+  private _needsUpdate = true;
+  private _size: THREE.Vector2;
 
   constructor(
     id: number,
@@ -447,100 +456,136 @@ class CSS2DShape extends Drawable {
     translation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
     font: string = CONFIG.defaultFont,
   ) {
-    const div = document.createElement("div");
-    div.style.color = "white";
-    div.style.font = font;
-    div.style.background = "transparent";
-    div.style.padding = "2px";
+    // Create canvas for texture
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+    canvas.width = 256;
+    canvas.height = 256;
+    ctx.fillStyle = "transparent";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (typeof content === "string") {
-      div.textContent = content;
-    } else {
-      const img = document.createElement("img");
-      img.src = (content as HTMLImageElement).src;
-      img.style.maxWidth = "100%";
-      img.style.maxHeight = "100%";
-      div.appendChild(img);
-    }
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(translation);
+    super(id, sprite);
 
-    const label = new CSS2DObject(div);
-    label.position.copy(translation);
-    super(id, label);
-    this.label = label;
-    this.element = div;
+    this.sprite = sprite;
+    this.canvas = canvas;
+    this.ctx = ctx;
+    this.texture = texture;
+    this._content = content;
+    this._font = font;
     this._strokeColor = new THREE.Color(1, 1, 1);
     this._fillColor = null;
     this._opacity = 1;
+    this._size = new THREE.Vector2(1, 1);
+
+    this.updateCanvas();
   }
 
+  // Public properties
   get text(): string {
-    if (this.element.firstChild && this.element.firstChild.nodeType === Node.TEXT_NODE) {
-      return this.element.textContent || "";
-    }
-    return "";
+    return typeof this._content === "string" ? this._content : "";
   }
   set text(t: string) {
-    this.clearContent();
-    this.element.textContent = t;
+    this._content = t;
+    this._needsUpdate = true;
   }
 
   get image(): HTMLImageElement | null {
-    const img = this.element.querySelector("img");
-    return img || null;
+    return this._content instanceof HTMLImageElement ? this._content : null;
   }
   set image(img: HTMLImageElement) {
-    this.clearContent();
-    const newImg = document.createElement("img");
-    newImg.src = img.src;
-    newImg.style.maxWidth = "100%";
-    newImg.style.maxHeight = "100%";
-    this.element.appendChild(newImg);
-  }
-
-  private clearContent() {
-    while (this.element.firstChild) {
-      this.element.removeChild(this.element.firstChild);
-    }
+    this._content = img;
+    this._needsUpdate = true;
   }
 
   get font(): string {
-    return this.element.style.font;
+    return this._font;
   }
   set font(f: string) {
-    this.element.style.font = f;
+    this._font = f;
+    this._needsUpdate = true;
   }
 
   public setStrokeColor(color: THREE.Color): void {
     this._strokeColor.copy(color);
-    this.element.style.color = color.getStyle();
+    this._needsUpdate = true;
   }
-
   public getStrokeColor(): THREE.Color {
     return this._strokeColor;
   }
 
   public setFillColor(color: THREE.Color | null): void {
     this._fillColor = color ? color.clone() : null;
-    this.element.style.background = color ? color.getStyle() : "transparent";
+    this._needsUpdate = true;
   }
-
   public getFillColor(): THREE.Color | null {
     return this._fillColor;
   }
 
   public setOpacity(opacity: number): void {
     this._opacity = opacity;
-    this.element.style.opacity = opacity.toString();
+    this.sprite.material.opacity = opacity;
   }
-
   public getOpacity(): number {
     return this._opacity;
   }
 
-  update(_now: number): void {}
+  public setSize(width: number, height: number): void {
+    this._size.set(width, height);
+    this.sprite.scale.set(width, height, 1);
+    this._needsUpdate = true;
+  }
+
+  private updateCanvas(): void {
+    if (!this._needsUpdate) return;
+
+    const ctx = this.ctx;
+    const canvas = this.canvas;
+
+    // Clear
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (this._fillColor) {
+      ctx.fillStyle = this._fillColor.getStyle();
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    if (typeof this._content === "string") {
+      // Draw text
+      ctx.font = this._font;
+      ctx.fillStyle = this._strokeColor.getStyle();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(this._content, canvas.width / 2, canvas.height / 2);
+    } else if (this._content instanceof HTMLImageElement) {
+      // Draw image
+      ctx.drawImage(this._content, 0, 0, canvas.width, canvas.height);
+      // Apply tint if stroke color is set (multiply blend)
+      if (this._strokeColor) {
+        ctx.globalCompositeOperation = "multiply";
+        ctx.fillStyle = this._strokeColor.getStyle();
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = "source-over";
+      }
+    }
+
+    this.texture.needsUpdate = true;
+    this._needsUpdate = false;
+  }
+
+  update(_now: number): void {
+    this.updateCanvas();
+  }
 
   dispose(): void {
-    this.label.removeFromParent();
+    this.sprite.material.dispose();
+    this.texture.dispose();
+    this.sprite.removeFromParent();
   }
 }
 
@@ -713,18 +758,15 @@ class Scene {
 
   private threeScene: THREE.Scene;
   private renderer: THREE.WebGLRenderer;
-  private labelRenderer: CSS2DRenderer;
   private camera: THREE.PerspectiveCamera;
 
   constructor(
     threeScene: THREE.Scene,
     renderer: THREE.WebGLRenderer,
-    labelRenderer: CSS2DRenderer,
     camera: THREE.PerspectiveCamera,
   ) {
     this.threeScene = threeScene;
     this.renderer = renderer;
-    this.labelRenderer = labelRenderer;
     this.camera = camera;
   }
 
@@ -854,7 +896,9 @@ class Scene {
 
   Text(text: string, font: string = CONFIG.defaultFont, translation = { x: 0, y: 0, z: 0 }): ShapeRef {
     const id = this.nextId++;
-    const shape = new CSS2DShape(id, text, new THREE.Vector3(translation.x, translation.y, translation.z), font);
+    const shape = new WebGLSpriteShape(id, text, new THREE.Vector3(translation.x, translation.y, translation.z), font);
+    // Set default size based on text length? We'll set a reasonable base size.
+    shape.setSize(2, 1);
     this.drawables.set(id, shape);
     this.addToThree(shape.getObject3D());
     return new ShapeRef(this, id);
@@ -874,7 +918,10 @@ class Scene {
       img = image;
     }
     const id = this.nextId++;
-    const shape = new CSS2DShape(id, img, new THREE.Vector3(translation.x, translation.y, translation.z));
+    const shape = new WebGLSpriteShape(id, img, new THREE.Vector3(translation.x, translation.y, translation.z));
+    // Set size based on image dimensions (maintain aspect)
+    const aspect = img.width / img.height;
+    shape.setSize(2 * aspect, 2);
     this.drawables.set(id, shape);
     this.addToThree(shape.getObject3D());
     return new ShapeRef(this, id);
@@ -899,7 +946,7 @@ class Scene {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
       d.setStrokeColor(color);
-    } else if (d instanceof CSS2DShape) {
+    } else if (d instanceof WebGLSpriteShape) {
       d.setStrokeColor(color);
     }
   }
@@ -908,7 +955,7 @@ class Scene {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
       d.setFillColor(color);
-    } else if (d instanceof CSS2DShape) {
+    } else if (d instanceof WebGLSpriteShape) {
       d.setFillColor(color);
     }
   }
@@ -917,14 +964,14 @@ class Scene {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
       d.setOpacity(value);
-    } else if (d instanceof CSS2DShape) {
+    } else if (d instanceof WebGLSpriteShape) {
       d.setOpacity(value);
     }
   }
 
   font(id: number, fontString: string): void {
     const d = this.drawables.get(id);
-    if (d instanceof CSS2DShape) d.font = fontString;
+    if (d instanceof WebGLSpriteShape) d.font = fontString;
   }
 
   lineWidth(id: number, width: number): void {
@@ -938,8 +985,13 @@ class Scene {
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      return d.setTranslationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    if (d instanceof BaseShape || d instanceof WebGLSpriteShape) {
+      // For simplicity, we'll assume all drawables that support translation have the same method structure.
+      // Actually, WebGLSpriteShape doesn't have keyframe methods yet. We'll need to add them if needed.
+      // For now, we only support BaseShape keyframes.
+      if (d instanceof BaseShape) {
+        return d.setTranslationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+      }
     }
     return Promise.reject(new Error("Shape does not support translation keyframes"));
   }
@@ -1148,7 +1200,6 @@ class Scene {
 
   render(): void {
     this.renderer.render(this.threeScene, this.camera);
-    this.labelRenderer.render(this.threeScene, this.camera);
 
     if (this.canvasRecorder && this.canvasRecorder.status === RecorderStatus.Recording) {
       this.canvasRecorder.step();
@@ -1202,7 +1253,7 @@ class ShapeRef {
   translate(x: number, y: number, z: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   translate(x: number, y: number, z: number = 0, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support translation animation"));
     }
     const target = new THREE.Vector3(x, y, z);
@@ -1220,7 +1271,7 @@ class ShapeRef {
   scale(sx: number, sy: number, sz: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   scale(sx: number, sy: number = sx, sz: number = 1, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support scale animation"));
     }
     const target = new THREE.Vector3(sx, sy, sz);
@@ -1238,7 +1289,7 @@ class ShapeRef {
   rotate(angle: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   rotate(angle: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support rotation animation"));
     }
     return this._animateOrSet(
@@ -1256,7 +1307,7 @@ class ShapeRef {
   stroke(color: THREE.Color | string, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const col = typeof color === "string" ? new THREE.Color(color) : color;
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support stroke color animation"));
     }
     return this._animateOrSet(
@@ -1278,7 +1329,7 @@ class ShapeRef {
     }
     const col = typeof color === "string" ? new THREE.Color(color) : color;
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support fill color animation"));
     }
     return this._animateOrSet(
@@ -1295,7 +1346,7 @@ class ShapeRef {
   opacity(value: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   opacity(value: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof CSS2DShape)) {
+    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
       return Promise.reject(new Error("Shape does not support opacity animation"));
     }
     return this._animateOrSet(
@@ -1411,15 +1462,23 @@ function create3DGrid(scene: THREE.Scene): void {
   const axesHelper = new THREE.AxesHelper(CONFIG.scaleX);
   scene.add(axesHelper);
 
+  // Helper to create sprite labels
   const makeLabel = (text: string, color: string, position: THREE.Vector3) => {
-    const div = document.createElement("div");
-    div.textContent = text;
-    div.style.color = color;
-    div.style.fontSize = "14px";
-    div.style.fontWeight = "bold";
-    const label = new CSS2DObject(div);
-    label.position.copy(position);
-    scene.add(label);
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = color;
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, canvas.width/2, canvas.height/2);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.scale.set(0.5, 0.5, 1);
+    scene.add(sprite);
   };
   makeLabel("X", "red", new THREE.Vector3(CONFIG.scaleX + 0.5, 0, 0));
   makeLabel("Y", "green", new THREE.Vector3(0, CONFIG.scaleY + 0.5, 0));
@@ -1428,37 +1487,63 @@ function create3DGrid(scene: THREE.Scene): void {
   const tickStyle = { color: "#aaa", fontSize: "10px" };
   for (let i = -CONFIG.scaleX; i <= CONFIG.scaleX; i++) {
     if (i === 0) continue;
-    const div = document.createElement("div");
-    div.textContent = i.toString();
-    div.style.cssText = `color: ${tickStyle.color}; font-size: ${tickStyle.fontSize};`;
-    const label = new CSS2DObject(div);
-    label.position.set(i, -0.2, -0.2);
-    scene.add(label);
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = tickStyle.color;
+    ctx.font = `${tickStyle.fontSize} sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(i, -0.2, -0.2);
+    sprite.scale.set(0.3, 0.3, 1);
+    scene.add(sprite);
   }
   for (let i = -CONFIG.scaleY; i <= CONFIG.scaleY; i++) {
     if (i === 0) continue;
-    const div = document.createElement("div");
-    div.textContent = i.toString();
-    div.style.cssText = `color: ${tickStyle.color}; font-size: ${tickStyle.fontSize};`;
-    const label = new CSS2DObject(div);
-    label.position.set(-0.2, i, -0.2);
-    scene.add(label);
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = tickStyle.color;
+    ctx.font = `${tickStyle.fontSize} sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(-0.2, i, -0.2);
+    sprite.scale.set(0.3, 0.3, 1);
+    scene.add(sprite);
   }
   for (let i = -CONFIG.scaleZ; i <= CONFIG.scaleZ; i++) {
     if (i === 0) continue;
-    const div = document.createElement("div");
-    div.textContent = i.toString();
-    div.style.cssText = `color: ${tickStyle.color}; font-size: ${tickStyle.fontSize};`;
-    const label = new CSS2DObject(div);
-    label.position.set(-0.2, -0.2, i);
-    scene.add(label);
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = tickStyle.color;
+    ctx.font = `${tickStyle.fontSize} sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(-0.2, -0.2, i);
+    sprite.scale.set(0.3, 0.3, 1);
+    scene.add(sprite);
   }
 }
 
 // ========== Main Execution ==========
 const canvas = document.getElementById("box") as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-const labelRenderer = new CSS2DRenderer();
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(10, 10, 15);
@@ -1470,7 +1555,6 @@ function setEvenSize() {
   const evenWidth = width % 2 === 0 ? width : width + 1;
   const evenHeight = height % 2 === 0 ? height : height + 1;
   renderer.setSize(evenWidth, evenHeight);
-  labelRenderer.setSize(evenWidth, evenHeight);
   camera.aspect = evenWidth / evenHeight;
   camera.updateProjectionMatrix();
 }
@@ -1488,14 +1572,7 @@ controls.zoomSpeed = 1.2;
 controls.minDistance = 0.2;
 controls.panSpeed = 0.8;
 
-labelRenderer.setSize(window.innerWidth, window.innerHeight);
-labelRenderer.domElement.style.position = "absolute";
-labelRenderer.domElement.style.top = "0px";
-labelRenderer.domElement.style.left = "0px";
-labelRenderer.domElement.style.pointerEvents = "none";
-document.body.appendChild(labelRenderer.domElement);
-
-const jsketchScene = new Scene(threeScene, renderer, labelRenderer, camera);
+const jsketchScene = new Scene(threeScene, renderer, camera);
 create3DGrid(threeScene);
 
 function animate(): void {
