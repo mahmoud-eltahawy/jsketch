@@ -32,7 +32,6 @@ renderer.setClearColor(0x000000);
 
 const scene = new THREE.Scene();
 
-// Perspective camera for 3D view
 const camera = new THREE.PerspectiveCamera(
   45,
   window.innerWidth / window.innerHeight,
@@ -129,7 +128,6 @@ class KeyframeAnimation<T> {
 
   constructor(keyframes: Keyframe<T>[], duration: number, startTime: number) {
     if (keyframes.length === 0) throw new Error("Keyframes cannot be empty");
-    // Sort by time and ensure start/end keyframes exist
     this.keyframes = [...keyframes].sort((a, b) => a.time - b.time);
     if (this.keyframes[0].time !== 0) {
       this.keyframes.unshift({ time: 0, value: this.keyframes[0].value });
@@ -169,7 +167,6 @@ class KeyframeAnimation<T> {
         : to.easing;
       if (easingFn) easedT = easingFn(segmentT);
     }
-    // Handle specific types
     if (
       from.value instanceof THREE.Vector3 && to.value instanceof THREE.Vector3
     ) {
@@ -220,18 +217,18 @@ interface KeyframeAnimations {
   strokeColor: KeyframeAnimation<THREE.Color> | null;
   fillColor: KeyframeAnimation<THREE.Color> | null;
   opacity: KeyframeAnimation<number> | null;
-  drawProgress: KeyframeAnimation<number> | null; // new
+  drawProgress: KeyframeAnimation<number> | null;
 }
 
-/**
- * Base class for all 2D shapes that can be placed in 3D space.
- */
+// Type for animation promises
+type AnimationPromise = { promise: Promise<void>; resolve: () => void };
+
 abstract class BaseShape extends Drawable {
   protected group: THREE.Group;
   protected fillMesh: THREE.Mesh | null = null;
   protected strokeLines: THREE.Line | THREE.LineSegments | null = null;
   protected vertices: THREE.Vector3[];
-  private _drawProgress = 1; // 0 = invisible, 1 = fully drawn
+  private _drawProgress = 1;
 
   public strokeColor: THREE.Color;
   public fillColor: THREE.Color | null;
@@ -248,6 +245,17 @@ abstract class BaseShape extends Drawable {
     opacity: null,
     drawProgress: null,
   };
+
+  // Promises for each animation type
+  private animationPromises: {
+    translation?: AnimationPromise;
+    scale?: AnimationPromise;
+    rotation?: AnimationPromise;
+    strokeColor?: AnimationPromise;
+    fillColor?: AnimationPromise;
+    opacity?: AnimationPromise;
+    drawProgress?: AnimationPromise;
+  } = {};
 
   constructor(
     id: number,
@@ -278,7 +286,7 @@ abstract class BaseShape extends Drawable {
     this.rebuildGeometry();
   }
 
-  // Public getters for protected members (used by MorphShape)
+  // Public getters for protected members
   public getVertices(): THREE.Vector3[] {
     return this.vertices;
   }
@@ -316,7 +324,7 @@ abstract class BaseShape extends Drawable {
     this.rebuildGeometry();
   }
 
-  // Public methods for external modification (used by Scene)
+  // Public methods for external modification
   public setStrokeColor(color: THREE.Color): void {
     this.strokeColor.copy(color);
     this.updateMaterialColors();
@@ -334,14 +342,12 @@ abstract class BaseShape extends Drawable {
 
   public setPointSize(size: number): void {
     this.lineWidth = size;
-    // Note: linewidth is not supported by WebGLRenderer, but we keep for compatibility
   }
 
   protected rebuildGeometry(): void {
     if (this.fillMesh) this.group.remove(this.fillMesh);
     if (this.strokeLines) this.group.remove(this.strokeLines);
 
-    // Fill mesh - only show when drawing is complete
     if (this.fillColor && this.vertices.length >= 3 && this._drawProgress === 1) {
       const points = this.vertices.map((v) => new THREE.Vector2(v.x, v.y));
       const shape = new THREE.Shape(points);
@@ -357,16 +363,13 @@ abstract class BaseShape extends Drawable {
       this.group.add(this.fillMesh);
     }
 
-    // Stroke lines - partial based on drawProgress
     if (this.vertices.length > 0) {
-      // Determine how many vertices to include
       let numPoints = Math.max(2, Math.floor(this.vertices.length * this._drawProgress));
       if (numPoints < 2) numPoints = 0;
 
       let points: THREE.Vector3[] = [];
       if (numPoints > 0) {
         points = this.vertices.slice(0, numPoints);
-        // If closed and we have all vertices, add the closing segment
         if (this.closed && numPoints === this.vertices.length) {
           points.push(points[0].clone());
         }
@@ -397,83 +400,95 @@ abstract class BaseShape extends Drawable {
     }
   }
 
-  // Public animation setters
+  // Private helper to manage animation promises
+  private async startAnimation<K extends keyof typeof this.animationPromises>(
+    type: K,
+    setKeyframes: () => void
+  ): Promise<this> {
+    // Resolve any existing promise for this type (cancel previous)
+    if (this.animationPromises[type]) {
+      this.animationPromises[type]!.resolve();
+      delete this.animationPromises[type];
+    }
+    // Create a new promise
+    let resolve: () => void;
+    const promise = new Promise<void>((res) => { resolve = res; });
+    this.animationPromises[type] = { promise, resolve: resolve! };
+    // Start the animation
+    setKeyframes();
+    // Return a promise that resolves to this shape when animation finishes
+    return promise.then(() => this);
+  }
+
+  // Animation setters that now return promises
   setTranslationKeyframes(
     keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.translation = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('translation', () => {
+      this.keyframes.translation = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setScaleKeyframes(
     keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.scale = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('scale', () => {
+      this.keyframes.scale = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setRotationKeyframes(
     keyframes: Keyframe<number>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.rotation = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('rotation', () => {
+      this.keyframes.rotation = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setStrokeColorKeyframes(
     keyframes: Keyframe<THREE.Color>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.strokeColor = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('strokeColor', () => {
+      this.keyframes.strokeColor = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setFillColorKeyframes(
     keyframes: Keyframe<THREE.Color>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.fillColor = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('fillColor', () => {
+      this.keyframes.fillColor = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setOpacityKeyframes(
     keyframes: Keyframe<number>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.opacity = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('opacity', () => {
+      this.keyframes.opacity = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
+
   setDrawProgressKeyframes(
     keyframes: Keyframe<number>[],
     duration: number,
     startTime: number,
-  ): void {
-    this.keyframes.drawProgress = new KeyframeAnimation(
-      keyframes,
-      duration,
-      startTime,
-    );
+  ): Promise<this> {
+    return this.startAnimation('drawProgress', () => {
+      this.keyframes.drawProgress = new KeyframeAnimation(keyframes, duration, startTime);
+    });
   }
 
   private updateAnimations(now: number): void {
@@ -482,6 +497,8 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.translation.isFinished(now)) {
         this.group.position.copy(this.keyframes.translation.sample(now));
         this.keyframes.translation = null;
+        this.animationPromises.translation?.resolve();
+        delete this.animationPromises.translation;
       } else {
         this.group.position.copy(this.keyframes.translation.sample(now));
       }
@@ -491,15 +508,19 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.scale.isFinished(now)) {
         this.group.scale.copy(this.keyframes.scale.sample(now));
         this.keyframes.scale = null;
+        this.animationPromises.scale?.resolve();
+        delete this.animationPromises.scale;
       } else {
         this.group.scale.copy(this.keyframes.scale.sample(now));
       }
     }
-    // Rotation (around Z)
+    // Rotation
     if (this.keyframes.rotation) {
       if (this.keyframes.rotation.isFinished(now)) {
         this.group.rotation.z = this.keyframes.rotation.sample(now);
         this.keyframes.rotation = null;
+        this.animationPromises.rotation?.resolve();
+        delete this.animationPromises.rotation;
       } else {
         this.group.rotation.z = this.keyframes.rotation.sample(now);
       }
@@ -509,6 +530,8 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.strokeColor.isFinished(now)) {
         this.strokeColor.copy(this.keyframes.strokeColor.sample(now));
         this.keyframes.strokeColor = null;
+        this.animationPromises.strokeColor?.resolve();
+        delete this.animationPromises.strokeColor;
         this.updateMaterialColors();
       } else {
         this.strokeColor.copy(this.keyframes.strokeColor.sample(now));
@@ -520,6 +543,8 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.fillColor.isFinished(now)) {
         this.fillColor = this.keyframes.fillColor.sample(now);
         this.keyframes.fillColor = null;
+        this.animationPromises.fillColor?.resolve();
+        delete this.animationPromises.fillColor;
         this.updateMaterialColors();
       } else {
         this.fillColor = this.keyframes.fillColor.sample(now);
@@ -531,6 +556,8 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.opacity.isFinished(now)) {
         this.opacity = this.keyframes.opacity.sample(now);
         this.keyframes.opacity = null;
+        this.animationPromises.opacity?.resolve();
+        delete this.animationPromises.opacity;
         this.updateMaterialColors();
       } else {
         this.opacity = this.keyframes.opacity.sample(now);
@@ -542,6 +569,8 @@ abstract class BaseShape extends Drawable {
       if (this.keyframes.drawProgress.isFinished(now)) {
         this.setDrawProgress(this.keyframes.drawProgress.sample(now));
         this.keyframes.drawProgress = null;
+        this.animationPromises.drawProgress?.resolve();
+        delete this.animationPromises.drawProgress;
       } else {
         this.setDrawProgress(this.keyframes.drawProgress.sample(now));
       }
@@ -554,7 +583,6 @@ abstract class BaseShape extends Drawable {
 }
 
 // ========== Concrete Shapes ==========
-// (unchanged, same as original)
 class CircleShape extends BaseShape {
   constructor(id: number, radius: number) {
     const vertices: THREE.Vector3[] = [];
@@ -663,7 +691,6 @@ class ParametricCurveShape extends BaseShape {
 }
 
 class TextShape extends Drawable {
-  // unchanged
   private element: HTMLDivElement;
   public strokeColor: THREE.Color;
   public fillColor: THREE.Color | null;
@@ -730,7 +757,6 @@ class TextShape extends Drawable {
 }
 
 class ImageShape extends Drawable {
-  // unchanged
   public opacity: number;
 
   constructor(
@@ -759,13 +785,14 @@ class ImageShape extends Drawable {
 }
 
 // ========== Morphing Shape ==========
-// (unchanged)
 class MorphShape extends BaseShape {
   private shape1: BaseShape;
   private shape2: BaseShape;
   private duration: number;
   private startTime: number;
   private sceneRef: Scene;
+  private completionResolve?: () => void;
+  private completionPromise: Promise<void>;
 
   constructor(
     id: number,
@@ -786,12 +813,20 @@ class MorphShape extends BaseShape {
     this.duration = duration;
     this.startTime = startTime;
     this.sceneRef = scene;
+    this.completionPromise = new Promise((resolve) => {
+      this.completionResolve = resolve;
+    });
+  }
+
+  getCompletionPromise(): Promise<void> {
+    return this.completionPromise;
   }
 
   update(now: number): void {
     const elapsed = now - this.startTime;
     let t = Math.min(elapsed / this.duration, 1);
     if (t >= 1) {
+      this.completionResolve?.();
       this.sceneRef.markForRemoval(this.id);
       return;
     }
@@ -846,7 +881,6 @@ class MorphShape extends BaseShape {
 }
 
 // ========== Utility: Polyline Resampling ==========
-// (unchanged)
 function resamplePolyline(
   vertices: THREE.Vector3[],
   closed: boolean,
@@ -855,7 +889,6 @@ function resamplePolyline(
   if (vertices.length === 0) return [];
   if (vertices.length === 1) return Array(numPoints).fill(vertices[0].clone());
 
-  // Compute cumulative distances
   const dist: number[] = [0];
   for (let i = 1; i < vertices.length; i++) {
     const dx = vertices[i].x - vertices[i - 1].x;
@@ -864,7 +897,6 @@ function resamplePolyline(
   }
 
   if (closed) {
-    // Close the loop
     const dx = vertices[0].x - vertices[vertices.length - 1].x;
     const dy = vertices[0].y - vertices[vertices.length - 1].y;
     const closingLen = Math.hypot(dx, dy);
@@ -907,7 +939,6 @@ function resamplePolyline(
       const y = lerp(seg.start.y, seg.end.y, segT);
       result.push(new THREE.Vector3(x, y, 0));
     }
-    // Ensure the last point is exactly the first to close properly
     if (result.length > 0) {
       result[result.length - 1] = new THREE.Vector3(
         result[0].x,
@@ -940,19 +971,14 @@ class Scene {
   private drawables = new Map<number, Drawable>();
   private nextId = 0;
   private removalSet = new Set<number>();
-
-  // Pause/resume support
   private pauseStartReal: number | null = null;
   private pauseDuration: number | null = null;
   private effectiveTimeAtPauseStart: number | null = null;
   private totalPausedTime = 0;
-
-  // Recording support
   private mediaRecorder: MediaRecorder | null = null;
   private recordedChunks: Blob[] = [];
   private recordingTimeout: number | null = null;
 
-  // Helper to get current effective time (accounting for pauses)
   public currentEffectiveTime(): number {
     const now = performance.now();
     if (this.pauseStartReal !== null) {
@@ -1115,92 +1141,93 @@ class Scene {
     if (d instanceof BaseShape) d.setPointSize(size);
   }
 
-  // --- Keyframe animations ---
-  translateKeyframes(
+  // --- Keyframe animations (now return promises) ---
+  async translateKeyframes(
     id: number,
     keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
-  ): void {
+  ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
-      d.setTranslationKeyframes(
-        keyframes,
-        duration,
-        this.currentEffectiveTime(),
-      );
+      return d.setTranslationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
     }
-  }
-  scaleKeyframes(
-    id: number,
-    keyframes: Keyframe<THREE.Vector3>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setScaleKeyframes(keyframes, duration, this.currentEffectiveTime());
-    }
-  }
-  rotationKeyframes(
-    id: number,
-    keyframes: Keyframe<number>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setRotationKeyframes(keyframes, duration, this.currentEffectiveTime());
-    }
-  }
-  strokeColorKeyframes(
-    id: number,
-    keyframes: Keyframe<THREE.Color>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setStrokeColorKeyframes(
-        keyframes,
-        duration,
-        this.currentEffectiveTime(),
-      );
-    }
-  }
-  fillColorKeyframes(
-    id: number,
-    keyframes: Keyframe<THREE.Color>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setFillColorKeyframes(keyframes, duration, this.currentEffectiveTime());
-    }
-  }
-  opacityKeyframes(
-    id: number,
-    keyframes: Keyframe<number>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setOpacityKeyframes(keyframes, duration, this.currentEffectiveTime());
-    }
-  }
-  drawProgressKeyframes(
-    id: number,
-    keyframes: Keyframe<number>[],
-    duration: number,
-  ): void {
-    const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      d.setDrawProgressKeyframes(
-        keyframes,
-        duration,
-        this.currentEffectiveTime(),
-      );
-    }
+    return Promise.resolve(new ShapeRef(this, id));
   }
 
-  // --- Morph ---
-  morph(id1: number, id2: number, duration = ANIMATION_DURATION): number {
+  async scaleKeyframes(
+    id: number,
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setScaleKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  async rotationKeyframes(
+    id: number,
+    keyframes: Keyframe<number>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setRotationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  async strokeColorKeyframes(
+    id: number,
+    keyframes: Keyframe<THREE.Color>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setStrokeColorKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  async fillColorKeyframes(
+    id: number,
+    keyframes: Keyframe<THREE.Color>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setFillColorKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  async opacityKeyframes(
+    id: number,
+    keyframes: Keyframe<number>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setOpacityKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  async drawProgressKeyframes(
+    id: number,
+    keyframes: Keyframe<number>[],
+    duration: number,
+  ): Promise<ShapeRef> {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      return d.setDrawProgressKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    }
+    return Promise.resolve(new ShapeRef(this, id));
+  }
+
+  // --- Morph (returns a promise that resolves when morph finishes) ---
+  morph(id1: number, id2: number, duration = ANIMATION_DURATION): Promise<void> {
     const shape1 = this.drawables.get(id1);
     const shape2 = this.drawables.get(id2);
     if (!(shape1 instanceof BaseShape) || !(shape2 instanceof BaseShape)) {
@@ -1217,7 +1244,7 @@ class Scene {
     );
     this.drawables.set(morphId, morph);
     this.addToThree(morph.getObject3D());
-    return morphId;
+    return morph.getCompletionPromise();
   }
 
   // --- Removal ---
@@ -1302,7 +1329,6 @@ class Scene {
 
   // --- Update and Render ---
   update(now: number): void {
-    // Handle pause logic
     if (this.pauseStartReal !== null) {
       const elapsedPause = now - this.pauseStartReal;
       if (elapsedPause < this.pauseDuration!) return;
@@ -1341,7 +1367,7 @@ class Scene {
   }
 }
 
-// ========== Shape Reference (Fluent API) ==========
+// ========== Shape Reference (Fluent API with async support) ==========
 class ShapeRef {
   private scene: Scene;
   private id: number;
@@ -1351,13 +1377,10 @@ class ShapeRef {
     this.id = id;
   }
 
-  translate(
-    x: number,
-    y: number,
-    z = 0,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  // Overloads for translate to handle both sync and async
+  translate(x: number, y: number, z?: number, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  translate(x: number, y: number, z: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  translate(x: number, y: number, z: number = 0, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     if (duration > 0) {
       const shape = this.scene.getShape(this.id);
       if (shape instanceof BaseShape) {
@@ -1366,21 +1389,18 @@ class ShapeRef {
           { time: 0, value: current },
           { time: 1, value: new THREE.Vector3(x, y, z), easing },
         ];
-        this.scene.translateKeyframes(this.id, keyframes, duration);
+        return this.scene.translateKeyframes(this.id, keyframes, duration);
       }
     } else {
       this.scene.translate(this.id, x, y, z);
+      return this;
     }
-    return this;
+    return this; // fallback
   }
 
-  scale(
-    sx: number,
-    sy = sx,
-    sz = 1,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  scale(sx: number, sy?: number, sz?: number, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  scale(sx: number, sy: number, sz: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  scale(sx: number, sy: number = sx, sz: number = 1, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     if (duration > 0) {
       const shape = this.scene.getShape(this.id);
       if (shape instanceof BaseShape) {
@@ -1389,19 +1409,18 @@ class ShapeRef {
           { time: 0, value: current },
           { time: 1, value: new THREE.Vector3(sx, sy, sz), easing },
         ];
-        this.scene.scaleKeyframes(this.id, keyframes, duration);
+        return this.scene.scaleKeyframes(this.id, keyframes, duration);
       }
     } else {
       this.scene.scale(this.id, sx, sy, sz);
+      return this;
     }
     return this;
   }
 
-  rotate(
-    angle: number,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  rotate(angle: number, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  rotate(angle: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  rotate(angle: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     if (duration > 0) {
       const shape = this.scene.getShape(this.id);
       if (shape instanceof BaseShape) {
@@ -1410,19 +1429,18 @@ class ShapeRef {
           { time: 0, value: current },
           { time: 1, value: angle, easing },
         ];
-        this.scene.rotationKeyframes(this.id, keyframes, duration);
+        return this.scene.rotationKeyframes(this.id, keyframes, duration);
       }
     } else {
       this.scene.rotate(this.id, angle);
+      return this;
     }
     return this;
   }
 
-  stroke(
-    color: THREE.Color | string,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  stroke(color: THREE.Color | string, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  stroke(color: THREE.Color | string, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  stroke(color: THREE.Color | string, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     const col = typeof color === "string" ? new THREE.Color(color) : color;
     if (duration > 0) {
       const shape = this.scene.getShape(this.id);
@@ -1432,21 +1450,21 @@ class ShapeRef {
           { time: 0, value: current },
           { time: 1, value: col, easing },
         ];
-        this.scene.strokeColorKeyframes(this.id, keyframes, duration);
+        return this.scene.strokeColorKeyframes(this.id, keyframes, duration);
       }
     } else {
       this.scene.strokeColor(this.id, col);
+      return this;
     }
     return this;
   }
 
-  fill(
-    color: THREE.Color | string | null,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  fill(color: THREE.Color | string | null, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  fill(color: THREE.Color | string | null, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  fill(color: THREE.Color | string | null, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     if (color === null) {
       this.scene.fillColor(this.id, null);
+      return this;
     } else {
       const col = typeof color === "string" ? new THREE.Color(color) : color;
       if (duration > 0) {
@@ -1457,20 +1475,19 @@ class ShapeRef {
             { time: 0, value: current },
             { time: 1, value: col, easing },
           ];
-          this.scene.fillColorKeyframes(this.id, keyframes, duration);
+          return this.scene.fillColorKeyframes(this.id, keyframes, duration);
         }
       } else {
         this.scene.fillColor(this.id, col);
+        return this;
       }
     }
     return this;
   }
 
-  opacity(
-    value: number,
-    duration = 0,
-    easing: EasingFunction | string = "linear",
-  ): this {
+  opacity(value: number, duration?: number, easing?: EasingFunction | string): ShapeRef;
+  opacity(value: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
+  opacity(value: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
     if (duration > 0) {
       const shape = this.scene.getShape(this.id);
       if (shape instanceof BaseShape) {
@@ -1479,24 +1496,25 @@ class ShapeRef {
           { time: 0, value: current },
           { time: 1, value, easing },
         ];
-        this.scene.opacityKeyframes(this.id, keyframes, duration);
+        return this.scene.opacityKeyframes(this.id, keyframes, duration);
       }
     } else {
       this.scene.opacity(this.id, value);
+      return this;
     }
     return this;
   }
 
-  draw(duration = ANIMATION_DURATION, easing: EasingFunction | string = "linear"): this {
+  draw(duration: number = ANIMATION_DURATION, easing: EasingFunction | string = "linear"): Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
     if (shape instanceof BaseShape) {
       const keyframes: Keyframe<number>[] = [
         { time: 0, value: 0 },
         { time: 1, value: 1, easing },
       ];
-      this.scene.drawProgressKeyframes(this.id, keyframes, duration);
+      return this.scene.drawProgressKeyframes(this.id, keyframes, duration);
     }
-    return this;
+    return Promise.resolve(this);
   }
 
   keyframes(config: any, duration: number): this {
@@ -1568,15 +1586,9 @@ class ShapeRef {
     return this;
   }
 
-  lineDash(_dashArray: number[]): this {
-    /* not implemented */ return this;
-  }
-  lineCap(_cap: CanvasLineCap): this {
-    /* not implemented */ return this;
-  }
-  lineJoin(_join: CanvasLineJoin): this {
-    /* not implemented */ return this;
-  }
+  lineDash(_dashArray: number[]): this { return this; }
+  lineCap(_cap: CanvasLineCap): this { return this; }
+  lineJoin(_join: CanvasLineJoin): this { return this; }
   font(fontString: string): this {
     this.scene.font(this.id, fontString);
     return this;
@@ -1589,9 +1601,8 @@ class ShapeRef {
     return this.pointSize(width);
   }
 
-  morph(other: ShapeRef, duration = ANIMATION_DURATION): ShapeRef {
-    const morphId = this.scene.morph(this.id, other.id, duration);
-    return new ShapeRef(this.scene, morphId);
+  morph(other: ShapeRef, duration = ANIMATION_DURATION): Promise<void> {
+    return this.scene.morph(this.id, other.id, duration);
   }
 
   remove(): void {
@@ -1600,9 +1611,7 @@ class ShapeRef {
 }
 
 // ========== 3D Grid and Axes ==========
-// (unchanged)
 function create3DGrid(): void {
-  // Grid on XZ plane at Y = -CONFIG.scaleY/2 (so it's below the main shapes)
   const gridHelper = new THREE.GridHelper(
     CONFIG.scaleX * 2,
     20,
@@ -1612,11 +1621,9 @@ function create3DGrid(): void {
   gridHelper.position.y = -CONFIG.scaleY / 2;
   scene.add(gridHelper);
 
-  // Colored axes
   const axesHelper = new THREE.AxesHelper(CONFIG.scaleX);
   scene.add(axesHelper);
 
-  // CSS2D labels for X, Y, Z
   const makeLabel = (text: string, color: string, position: THREE.Vector3) => {
     const div = document.createElement("div");
     div.textContent = text;
@@ -1631,7 +1638,6 @@ function create3DGrid(): void {
   makeLabel("Y", "green", new THREE.Vector3(0, CONFIG.scaleY + 0.5, 0));
   makeLabel("Z", "blue", new THREE.Vector3(0, 0, CONFIG.scaleZ + 0.5));
 
-  // Optional: small tick labels at integer positions
   const tickStyle = { color: "#aaa", fontSize: "10px" };
   for (let i = -CONFIG.scaleX; i <= CONFIG.scaleX; i++) {
     if (i === 0) continue;
@@ -1686,9 +1692,7 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// ========== Test Suite ==========
-// Updated test functions (replace the old ones)
-
+// ========== Test Suite (updated to use await) ==========
 async function testBasicShapes() {
   console.log("Test 1: Basic shapes creation and properties");
   jsketchScene.clear();
@@ -1713,12 +1717,10 @@ async function testTextAndImage() {
   console.log("Test 4: Text and Image shapes");
   jsketchScene.clear();
 
-  // Text shape
   const text = jsketchScene.Text("Hello 3D!", "24px Arial", { x: -3, y: 2, z: 0 })
     .stroke("lime")
     .fill("green")
-    .opacity(0.2); // fill with alpha via opacity
-  // Create a same-origin image using canvas (data URL)
+    .opacity(0.2);
   const canvas = document.createElement("canvas");
   canvas.width = 100;
   canvas.height = 100;
@@ -1739,7 +1741,7 @@ async function testTextAndImage() {
   text.opacity(0.8, 2, "linear");
   image.translate(0, 0, 0, 3, "easeOutBounce");
 
-  await jsketchScene.wait(4);
+  await jsketchScene.wait(1);
   console.log("Test 4 completed");
 }
 
@@ -1753,7 +1755,7 @@ async function testKeyframeAnimations() {
   shape.rotate(Math.PI * 2, 2, "easeOutQuad");
   shape.opacity(0.2, 2, "easeInSine");
 
-  await jsketchScene.wait(3);
+  await jsketchScene.wait(1);
   const keyframes = {
     strokeColor: [
       { time: 0, value: "white" },
@@ -1763,7 +1765,7 @@ async function testKeyframeAnimations() {
   };
   shape.keyframes(keyframes, 2);
 
-  await jsketchScene.wait(3);
+  await jsketchScene.wait(2);
   console.log("Test 2 completed");
 }
 
@@ -1776,12 +1778,13 @@ async function testMorphing() {
   const star = jsketchScene.Star(2.5, 1, 5).translate(0, 4, 0).stroke("yellow");
   const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke("cyan");
 
-  const morph1 = circle.morph(square);
-  const morph2 = star.morph(poly);
-  morph1.opacity(0.5, 3);
-  morph2.opacity(0.5, 3);
+  await Promise.all([
+    circle.morph(square),
+    star.morph(poly)
+  ]);
+  console.log("Morphs completed");
 
-  await jsketchScene.wait(4);
+  await jsketchScene.wait(1);
   console.log("Test 3 completed");
 }
 
@@ -1790,15 +1793,15 @@ async function testPauseResume() {
   jsketchScene.clear();
 
   const shape = jsketchScene.Circle(2).stroke("white").fill("red");
-  shape.translate(5, 0, 0, 4, "linear");
-  shape.scale(2, 2, 1, 4, "linear");
+  const p1 = shape.translate(5, 0, 0, 4, "linear");
+  const p2 = shape.scale(2, 2, 1, 4, "linear");
 
   await jsketchScene.wait(1);
   console.log("Pausing for 2 seconds...");
   jsketchScene.pause(2);
   await jsketchScene.wait(2);
   console.log("Resumed");
-  await jsketchScene.wait(3);
+  await Promise.all([p1, p2]);
   console.log("Test 5 completed");
 }
 
@@ -1807,18 +1810,24 @@ async function testMultipleAnimationsAndRemoval() {
   jsketchScene.clear();
 
   const shapes = [];
+  const promises = [];
   for (let i = -4; i <= 4; i += 2) {
     const shape = jsketchScene.Square(1.5)
       .translate(i, 0, 0)
       .stroke(`hsl(${(i + 4) * 30}, 100%, 50%)`)
       .fill(`hsl(${(i + 4) * 30}, 100%, 50%)`)
-      .opacity(0.3)
-      .rotate(Math.PI * 2, 3, "easeOutQuad")
-      .scale(1.5, 1.5, 1, 2, "easeInOutSine");
+      .opacity(0.3);
+    const p = Promise.all([
+      shape.rotate(Math.PI * 2, 3, "easeOutQuad"),
+      shape.scale(1.5, 1.5, 1, 2, "easeInOutSine")
+    ]);
     shapes.push(shape);
+    promises.push(p);
   }
+  await Promise.all(promises);
+  console.log("Animations finished");
 
-  await jsketchScene.wait(2);
+  await jsketchScene.wait(1);
   for (let i = 0; i < shapes.length; i += 2) shapes[i].remove();
   console.log("Removed every other shape");
 
@@ -1833,7 +1842,7 @@ async function testErrorHandling() {
   const shape = jsketchScene.Circle(2);
   const text = jsketchScene.Text("Not a shape");
   try {
-    shape.morph(text);
+    await shape.morph(text);
     console.error("Morph should have thrown an error!");
   } catch (e: any) {
     console.log("Caught expected error:", e.message);
@@ -1842,17 +1851,19 @@ async function testErrorHandling() {
   console.log("Test 7 completed");
 }
 
-// Test 8: Draw animation
 async function testDrawAnimation() {
   console.log("Test 8: Draw animation");
   jsketchScene.clear();
 
-  jsketchScene.Circle(2).stroke("red").draw();
-  jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2000, "easeOutQuad");
-  jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1500);
-  jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3000, "easeOutElastic");
+  await Promise.all([
+    jsketchScene.Circle(2).stroke("red").draw(),
+    jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2000, "easeOutQuad"),
+    jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1500),
+    jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3000, "easeOutElastic")
+  ]);
+  console.log("All draw animations finished");
 
-  await jsketchScene.wait(4);
+  await jsketchScene.wait(1);
   console.log("Test 8 completed");
 }
 
