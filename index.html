@@ -1,10 +1,22 @@
 <!DOCTYPE html>
 <html>
 	<head>
-		<title>jsketch</title>
+		<title>jsketch 3D</title>
+		<style>
+			body { margin: 0; overflow: hidden; background: black; }
+			#info {
+				position: absolute;
+				top: 10px;
+				left: 10px;
+				color: white;
+				font-family: monospace;
+				z-index: 100;
+			}
+		</style>
 	</head>
 	<body>
+		<div id="info">jsketch + Three.js</div>
 		<canvas id="box"></canvas>
-		<script src="index.js"></script>
+		<script type="module" src="index.js"></script>
 	</body>
 </html>

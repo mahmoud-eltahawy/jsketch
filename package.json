@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "three": "^0.183.2",
+    "three-addons": "^1.2.0"
+  },
+  "name": "jsketch",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/three": "^0.183.1",
+    "vite": "^8.0.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
