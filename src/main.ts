@@ -626,7 +626,7 @@ class TextShape extends Drawable {
   constructor(
     id: number,
     text: string,
-    font = CONFIG.defaultFont,
+    font = CONFIG.defaultFont as string,
     translation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
   ) {
     const div = document.createElement("div");
@@ -979,7 +979,7 @@ class Scene {
 
   Text(
     text: string,
-    font = CONFIG.defaultFont,
+    font = CONFIG.defaultFont as string,
     translation = { x: 0, y: 0, z: 0 },
   ): ShapeRef {
     const id = this.nextId++;
@@ -1264,6 +1264,15 @@ class Scene {
   render(): void {
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
+  }
+
+  clear(): void {
+    for (const d of this.drawables.values()) {
+      this.removeFromThree(d.getObject3D());
+    }
+    this.drawables.clear();
+    this.removalSet.clear();
+    this.nextId = 0;
   }
 }
 
@@ -1591,13 +1600,230 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// Example test function (optional)
+// ========== Test Suite ==========
+
+// Helper to load an image for testing
+async function loadTestImage(): Promise<HTMLImageElement> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.src = "https://threejs.org/examples/textures/uv_grid_opengl.jpg";
+    // Fallback in case network is slow or fails
+    setTimeout(() => {
+      if (!img.complete) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 100;
+        canvas.height = 100;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "purple";
+        ctx.fillRect(0, 0, 100, 100);
+        ctx.fillStyle = "white";
+        ctx.font = "20px Arial";
+        ctx.fillText("IMG", 20, 50);
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob!);
+          const fallbackImg = new Image();
+          fallbackImg.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(fallbackImg);
+          };
+          fallbackImg.src = url;
+        });
+      }
+    }, 1000);
+  });
+}
+
+// Test 1: Basic shapes and properties
+async function testBasicShapes() {
+  console.log("Test 1: Basic shapes creation and properties");
+  jsketchScene.clear();
+
+  // Create shapes at different positions
+  jsketchScene.Circle(2).translate(-5, 3, 0).stroke("red").fill(
+    "rgba(255,0,0,0.3)",
+  );
+  jsketchScene.Square(2.5).translate(0, 3, 0).stroke("green").fill(
+    "rgba(0,255,0,0.3)",
+  );
+  jsketchScene.Line(-4, -2, 4, -2).stroke("cyan").lineWidth(3);
+  jsketchScene.RegularPolygon(2, 5).translate(5, 3, 0).stroke("orange").fill(
+    "rgba(255,165,0,0.3)",
+  );
+  jsketchScene.Star(2, 1, 5).translate(-5, -3, 0).stroke("yellow").fill(
+    "rgba(255,255,0,0.3)",
+  );
+  const parametric = jsketchScene.ParametricCurve(
+    (t) => 3 * Math.cos(2 * Math.PI * t),
+    (t) => 3 * Math.sin(2 * Math.PI * t),
+    0,
+    1,
+  ).stroke("magenta").lineWidth(2);
+  parametric.translate(5, -3, 0);
+
+  // Wait to observe
+  await jsketchScene.wait(2);
+  console.log("Test 1 completed");
+}
+
+// Test 2: Keyframe animations
+async function testKeyframeAnimations() {
+  console.log("Test 2: Keyframe animations with various easings");
+  jsketchScene.clear();
+
+  const shape = jsketchScene.RegularPolygon(2, 6).stroke("white").fill("blue");
+  // Translation with easeOutBounce
+  shape.translate(0, 0, 0, 3, "easeOutBounce");
+  // Scale with easeInElastic
+  shape.scale(3, 3, 1, 2, "easeInElastic");
+  // Rotation with easeOutQuad
+  shape.rotate(Math.PI * 2, 2, "easeOutQuad");
+  // Opacity fade
+  shape.opacity(0.2, 2, "easeInSine");
+
+  await jsketchScene.wait(3);
+  // Then change stroke color with keyframes (using keyframes method)
+  const keyframes = {
+    strokeColor: [
+      { time: 0, value: "white" },
+      { time: 0.5, value: "red", easing: "easeOutQuad" },
+      { time: 1, value: "blue", easing: "linear" },
+    ],
+  };
+  shape.keyframes(keyframes, 2);
+
+  await jsketchScene.wait(3);
+  console.log("Test 2 completed");
+}
+
+// Test 3: Morphing between shapes
+async function testMorphing() {
+  console.log("Test 3: Morphing between different shapes");
+  jsketchScene.clear();
+
+  const circle = jsketchScene.Circle(2).translate(-4, 0, 0).stroke("red");
+  const square = jsketchScene.Square(3).translate(4, 0, 0).stroke("green");
+  const star = jsketchScene.Star(2.5, 1, 5).translate(0, 4, 0).stroke("yellow");
+  const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke(
+    "cyan",
+  );
+
+  // Morph circle to square
+  const morph1 = circle.morph(square, 3);
+  // Morph star to polygon
+  const morph2 = star.morph(poly, 3);
+  // Also animate opacity
+  morph1.opacity(0.5, 3);
+  morph2.opacity(0.5, 3);
+
+  await jsketchScene.wait(4);
+  console.log("Test 3 completed");
+}
+
+// Test 4: Text and Image shapes
+async function testTextAndImage() {
+  console.log("Test 4: Text and Image shapes");
+  jsketchScene.clear();
+
+  // Text shape
+  const text = jsketchScene.Text("Hello 3D!", "24px Arial", {
+    x: -3,
+    y: 2,
+    z: 0,
+  })
+    .stroke("lime")
+    .fill("rgba(0,255,0,0.2)");
+  // Image shape (requires loading)
+  const img = await loadTestImage();
+  const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 });
+  // Animate text color and opacity
+  text.stroke("orange", 2, "easeOutQuad");
+  text.opacity(0.8, 2, "linear");
+  // Animate image position
+  image.translate(0, 0, 0, 3, "easeOutBounce");
+
+  await jsketchScene.wait(4);
+  console.log("Test 4 completed");
+}
+
+// Test 5: Pause/Resume functionality
+async function testPauseResume() {
+  console.log("Test 5: Pause/Resume functionality");
+  jsketchScene.clear();
+
+  const shape = jsketchScene.Circle(2).stroke("white").fill("red");
+  // Animate translation and scale
+  shape.translate(5, 0, 0, 4, "linear");
+  shape.scale(2, 2, 1, 4, "linear");
+
+  await jsketchScene.wait(1); // let animation start
+  console.log("Pausing for 2 seconds...");
+  jsketchScene.pause(2);
+  await jsketchScene.wait(2); // wait during pause
+  console.log("Resumed");
+  await jsketchScene.wait(3); // let animation continue and finish
+  console.log("Test 5 completed");
+}
+
+// Test 6: Multiple simultaneous animations and removal
+async function testMultipleAnimationsAndRemoval() {
+  console.log("Test 6: Multiple simultaneous animations and removal");
+  jsketchScene.clear();
+
+  const shapes = [];
+  for (let i = -4; i <= 4; i += 2) {
+    const shape = jsketchScene.Square(1.5)
+      .translate(i, 0, 0)
+      .stroke(`hsl(${(i + 4) * 30}, 100%, 50%)`)
+      .fill(`hsla(${(i + 4) * 30}, 100%, 50%, 0.3)`);
+    // Animate each with different properties
+    shape.rotate(Math.PI * 2, 3, "easeOutQuad");
+    shape.scale(1.5, 1.5, 1, 2, "easeInOutSine");
+    shapes.push(shape);
+  }
+
+  await jsketchScene.wait(2);
+  // Remove half of them
+  for (let i = 0; i < shapes.length; i += 2) {
+    shapes[i].remove();
+  }
+  console.log("Removed every other shape");
+
+  await jsketchScene.wait(2);
+  console.log("Test 6 completed");
+}
+
+// Test 7: Error handling (invalid morph)
+async function testErrorHandling() {
+  console.log("Test 7: Error handling (invalid morph)");
+  jsketchScene.clear();
+
+  const shape = jsketchScene.Circle(2);
+  const text = jsketchScene.Text("Not a shape");
+  try {
+    // This should throw an error because text is not a BaseShape
+    shape.morph(text);
+    console.error("Morph should have thrown an error!");
+  } catch (e) {
+    console.log("Caught expected error:", e);
+  }
+  await jsketchScene.wait(1);
+  console.log("Test 7 completed");
+}
+
+// Main test runner
 (window as any).runAllTests = async function () {
-  console.log("Running tests in 3D Three.js version...");
-  jsketchScene.startRecording({ duration: 30 });
-  const circle = jsketchScene.Circle(3).stroke("#ff0000");
-  const square = jsketchScene.Square(4).stroke("#00ff00").translate(5, 0, 2);
-  circle.morph(square, 3000);
-  await jsketchScene.wait(5);
+  console.log("Starting comprehensive test suite...");
+  jsketchScene.startRecording();
+
+  await testBasicShapes();
+  await testKeyframeAnimations();
+  await testMorphing();
+  await testTextAndImage();
+  await testPauseResume();
+  await testMultipleAnimationsAndRemoval();
+  await testErrorHandling();
+
+  console.log("All tests completed.");
   jsketchScene.stopRecording();
 };
