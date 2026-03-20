@@ -47,8 +47,7 @@ controls.enableRotate = true;
 controls.enableZoom = true;
 controls.enablePan = true;
 controls.zoomSpeed = 1.2;
-controls.zoomMin = 0.2;
-controls.zoomMax = 5;
+controls.minDistance = 0.2;
 controls.panSpeed = 0.8;
 
 const labelRenderer = new CSS2DRenderer();
@@ -221,6 +220,7 @@ interface KeyframeAnimations {
   strokeColor: KeyframeAnimation<THREE.Color> | null;
   fillColor: KeyframeAnimation<THREE.Color> | null;
   opacity: KeyframeAnimation<number> | null;
+  drawProgress: KeyframeAnimation<number> | null; // new
 }
 
 /**
@@ -231,6 +231,7 @@ abstract class BaseShape extends Drawable {
   protected fillMesh: THREE.Mesh | null = null;
   protected strokeLines: THREE.Line | THREE.LineSegments | null = null;
   protected vertices: THREE.Vector3[];
+  private _drawProgress = 1; // 0 = invisible, 1 = fully drawn
 
   public strokeColor: THREE.Color;
   public fillColor: THREE.Color | null;
@@ -245,6 +246,7 @@ abstract class BaseShape extends Drawable {
     strokeColor: null,
     fillColor: null,
     opacity: null,
+    drawProgress: null,
   };
 
   constructor(
@@ -305,6 +307,15 @@ abstract class BaseShape extends Drawable {
     return this.closed;
   }
 
+  public getDrawProgress(): number {
+    return this._drawProgress;
+  }
+
+  public setDrawProgress(progress: number): void {
+    this._drawProgress = Math.max(0, Math.min(1, progress));
+    this.rebuildGeometry();
+  }
+
   // Public methods for external modification (used by Scene)
   public setStrokeColor(color: THREE.Color): void {
     this.strokeColor.copy(color);
@@ -330,8 +341,8 @@ abstract class BaseShape extends Drawable {
     if (this.fillMesh) this.group.remove(this.fillMesh);
     if (this.strokeLines) this.group.remove(this.strokeLines);
 
-    // Fill mesh
-    if (this.fillColor && this.vertices.length >= 3) {
+    // Fill mesh - only show when drawing is complete
+    if (this.fillColor && this.vertices.length >= 3 && this._drawProgress === 1) {
       const points = this.vertices.map((v) => new THREE.Vector2(v.x, v.y));
       const shape = new THREE.Shape(points);
       const geometry = new THREE.ShapeGeometry(shape);
@@ -346,16 +357,31 @@ abstract class BaseShape extends Drawable {
       this.group.add(this.fillMesh);
     }
 
-    // Stroke lines
-    const points = this.vertices.map((v) => v.clone());
-    if (this.closed && points.length > 0) points.push(points[0].clone());
-    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
-    const lineMaterial = new THREE.LineBasicMaterial({
-      color: this.strokeColor,
-      linewidth: this.lineWidth,
-    });
-    this.strokeLines = new THREE.Line(lineGeometry, lineMaterial);
-    this.group.add(this.strokeLines);
+    // Stroke lines - partial based on drawProgress
+    if (this.vertices.length > 0) {
+      // Determine how many vertices to include
+      let numPoints = Math.max(2, Math.floor(this.vertices.length * this._drawProgress));
+      if (numPoints < 2) numPoints = 0;
+
+      let points: THREE.Vector3[] = [];
+      if (numPoints > 0) {
+        points = this.vertices.slice(0, numPoints);
+        // If closed and we have all vertices, add the closing segment
+        if (this.closed && numPoints === this.vertices.length) {
+          points.push(points[0].clone());
+        }
+      }
+
+      if (points.length >= 2) {
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+        const lineMaterial = new THREE.LineBasicMaterial({
+          color: this.strokeColor,
+          linewidth: this.lineWidth,
+        });
+        this.strokeLines = new THREE.Line(lineGeometry, lineMaterial);
+        this.group.add(this.strokeLines);
+      }
+    }
   }
 
   protected updateMaterialColors(): void {
@@ -438,6 +464,17 @@ abstract class BaseShape extends Drawable {
       startTime,
     );
   }
+  setDrawProgressKeyframes(
+    keyframes: Keyframe<number>[],
+    duration: number,
+    startTime: number,
+  ): void {
+    this.keyframes.drawProgress = new KeyframeAnimation(
+      keyframes,
+      duration,
+      startTime,
+    );
+  }
 
   private updateAnimations(now: number): void {
     // Translation
@@ -500,6 +537,15 @@ abstract class BaseShape extends Drawable {
         this.updateMaterialColors();
       }
     }
+    // Draw progress
+    if (this.keyframes.drawProgress) {
+      if (this.keyframes.drawProgress.isFinished(now)) {
+        this.setDrawProgress(this.keyframes.drawProgress.sample(now));
+        this.keyframes.drawProgress = null;
+      } else {
+        this.setDrawProgress(this.keyframes.drawProgress.sample(now));
+      }
+    }
   }
 
   public update(now: number): void {
@@ -508,6 +554,7 @@ abstract class BaseShape extends Drawable {
 }
 
 // ========== Concrete Shapes ==========
+// (unchanged, same as original)
 class CircleShape extends BaseShape {
   constructor(id: number, radius: number) {
     const vertices: THREE.Vector3[] = [];
@@ -616,6 +663,7 @@ class ParametricCurveShape extends BaseShape {
 }
 
 class TextShape extends Drawable {
+  // unchanged
   private element: HTMLDivElement;
   public strokeColor: THREE.Color;
   public fillColor: THREE.Color | null;
@@ -682,6 +730,7 @@ class TextShape extends Drawable {
 }
 
 class ImageShape extends Drawable {
+  // unchanged
   public opacity: number;
 
   constructor(
@@ -710,6 +759,7 @@ class ImageShape extends Drawable {
 }
 
 // ========== Morphing Shape ==========
+// (unchanged)
 class MorphShape extends BaseShape {
   private shape1: BaseShape;
   private shape2: BaseShape;
@@ -796,6 +846,7 @@ class MorphShape extends BaseShape {
 }
 
 // ========== Utility: Polyline Resampling ==========
+// (unchanged)
 function resamplePolyline(
   vertices: THREE.Vector3[],
   closed: boolean,
@@ -1133,6 +1184,20 @@ class Scene {
       d.setOpacityKeyframes(keyframes, duration, this.currentEffectiveTime());
     }
   }
+  drawProgressKeyframes(
+    id: number,
+    keyframes: Keyframe<number>[],
+    duration: number,
+  ): void {
+    const d = this.drawables.get(id);
+    if (d instanceof BaseShape) {
+      d.setDrawProgressKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      );
+    }
+  }
 
   // --- Morph ---
   morph(id1: number, id2: number, duration = ANIMATION_DURATION): number {
@@ -1422,6 +1487,19 @@ class ShapeRef {
     return this;
   }
 
+  // New method: animate drawing from 0 to 1
+  draw(duration: number, easing: EasingFunction | string = "linear"): this {
+    const shape = this.scene.getShape(this.id);
+    if (shape instanceof BaseShape) {
+      const keyframes: Keyframe<number>[] = [
+        { time: 0, value: 0 },
+        { time: 1, value: 1, easing },
+      ];
+      this.scene.drawProgressKeyframes(this.id, keyframes, duration);
+    }
+    return this;
+  }
+
   keyframes(config: any, duration: number): this {
     const shape = this.scene.getShape(this.id);
     if (!shape || !(shape instanceof BaseShape)) return this;
@@ -1480,6 +1558,14 @@ class ShapeRef {
       }));
       shape.setOpacityKeyframes(keyframes, duration, effectiveNow);
     }
+    if (config.drawProgress) {
+      const keyframes = config.drawProgress.map((kf: any) => ({
+        time: kf.time,
+        value: kf.value,
+        easing: kf.easing,
+      }));
+      shape.setDrawProgressKeyframes(keyframes, duration, effectiveNow);
+    }
     return this;
   }
 
@@ -1515,6 +1601,7 @@ class ShapeRef {
 }
 
 // ========== 3D Grid and Axes ==========
+// (unchanged)
 function create3DGrid(): void {
   // Grid on XZ plane at Y = -CONFIG.scaleY/2 (so it's below the main shapes)
   const gridHelper = new THREE.GridHelper(
@@ -1601,94 +1688,79 @@ window.addEventListener("resize", () => {
 });
 
 // ========== Test Suite ==========
+// Updated test functions (replace the old ones)
 
-// Helper to load an image for testing
-async function loadTestImage(): Promise<HTMLImageElement> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.src = "https://threejs.org/examples/textures/uv_grid_opengl.jpg";
-    // Fallback in case network is slow or fails
-    setTimeout(() => {
-      if (!img.complete) {
-        const canvas = document.createElement("canvas");
-        canvas.width = 100;
-        canvas.height = 100;
-        const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = "purple";
-        ctx.fillRect(0, 0, 100, 100);
-        ctx.fillStyle = "white";
-        ctx.font = "20px Arial";
-        ctx.fillText("IMG", 20, 50);
-        canvas.toBlob((blob) => {
-          const url = URL.createObjectURL(blob!);
-          const fallbackImg = new Image();
-          fallbackImg.onload = () => {
-            URL.revokeObjectURL(url);
-            resolve(fallbackImg);
-          };
-          fallbackImg.src = url;
-        });
-      }
-    }, 1000);
-  });
-}
-
-// Test 1: Basic shapes and properties
 async function testBasicShapes() {
   console.log("Test 1: Basic shapes creation and properties");
   jsketchScene.clear();
 
-  // Create shapes at different positions
-  jsketchScene.Circle(2).translate(-5, 3, 0).stroke("red").fill(
-    "rgba(255,0,0,0.3)",
-  );
-  jsketchScene.Square(2.5).translate(0, 3, 0).stroke("green").fill(
-    "rgba(0,255,0,0.3)",
-  );
+  jsketchScene.Circle(2).translate(-5, 3, 0).stroke("red").fill("red").opacity(0.3);
+  jsketchScene.Square(2.5).translate(0, 3, 0).stroke("green").fill("green").opacity(0.3);
   jsketchScene.Line(-4, -2, 4, -2).stroke("cyan").lineWidth(3);
-  jsketchScene.RegularPolygon(2, 5).translate(5, 3, 0).stroke("orange").fill(
-    "rgba(255,165,0,0.3)",
-  );
-  jsketchScene.Star(2, 1, 5).translate(-5, -3, 0).stroke("yellow").fill(
-    "rgba(255,255,0,0.3)",
-  );
+  jsketchScene.RegularPolygon(2, 5).translate(5, 3, 0).stroke("orange").fill("orange").opacity(0.3);
+  jsketchScene.Star(2, 1, 5).translate(-5, -3, 0).stroke("yellow").fill("yellow").opacity(0.3);
   const parametric = jsketchScene.ParametricCurve(
     (t) => 3 * Math.cos(2 * Math.PI * t),
     (t) => 3 * Math.sin(2 * Math.PI * t),
-    0,
-    1,
+    0, 1
   ).stroke("magenta").lineWidth(2);
   parametric.translate(5, -3, 0);
 
-  // Wait to observe
   await jsketchScene.wait(2);
   console.log("Test 1 completed");
 }
 
-// Test 2: Keyframe animations
+async function testTextAndImage() {
+  console.log("Test 4: Text and Image shapes");
+  jsketchScene.clear();
+
+  // Text shape
+  const text = jsketchScene.Text("Hello 3D!", "24px Arial", { x: -3, y: 2, z: 0 })
+    .stroke("lime")
+    .fill("green")
+    .opacity(0.2); // fill with alpha via opacity
+  // Create a same-origin image using canvas (data URL)
+  const canvas = document.createElement("canvas");
+  canvas.width = 100;
+  canvas.height = 100;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "purple";
+  ctx.fillRect(0, 0, 100, 100);
+  ctx.fillStyle = "white";
+  ctx.font = "20px Arial";
+  ctx.fillText("IMG", 20, 50);
+  const dataUrl = canvas.toDataURL();
+  const img = new Image();
+  await new Promise((resolve) => {
+    img.onload = resolve;
+    img.src = dataUrl;
+  });
+  const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 });
+  text.stroke("orange", 2, "easeOutQuad");
+  text.opacity(0.8, 2, "linear");
+  image.translate(0, 0, 0, 3, "easeOutBounce");
+
+  await jsketchScene.wait(4);
+  console.log("Test 4 completed");
+}
+
 async function testKeyframeAnimations() {
   console.log("Test 2: Keyframe animations with various easings");
   jsketchScene.clear();
 
   const shape = jsketchScene.RegularPolygon(2, 6).stroke("white").fill("blue");
-  // Translation with easeOutBounce
   shape.translate(0, 0, 0, 3, "easeOutBounce");
-  // Scale with easeInElastic
   shape.scale(3, 3, 1, 2, "easeInElastic");
-  // Rotation with easeOutQuad
   shape.rotate(Math.PI * 2, 2, "easeOutQuad");
-  // Opacity fade
   shape.opacity(0.2, 2, "easeInSine");
 
   await jsketchScene.wait(3);
-  // Then change stroke color with keyframes (using keyframes method)
   const keyframes = {
     strokeColor: [
       { time: 0, value: "white" },
       { time: 0.5, value: "red", easing: "easeOutQuad" },
-      { time: 1, value: "blue", easing: "linear" },
-    ],
+      { time: 1, value: "blue", easing: "linear" }
+    ]
   };
   shape.keyframes(keyframes, 2);
 
@@ -1696,7 +1768,6 @@ async function testKeyframeAnimations() {
   console.log("Test 2 completed");
 }
 
-// Test 3: Morphing between shapes
 async function testMorphing() {
   console.log("Test 3: Morphing between different shapes");
   jsketchScene.clear();
@@ -1704,15 +1775,10 @@ async function testMorphing() {
   const circle = jsketchScene.Circle(2).translate(-4, 0, 0).stroke("red");
   const square = jsketchScene.Square(3).translate(4, 0, 0).stroke("green");
   const star = jsketchScene.Star(2.5, 1, 5).translate(0, 4, 0).stroke("yellow");
-  const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke(
-    "cyan",
-  );
+  const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke("cyan");
 
-  // Morph circle to square
   const morph1 = circle.morph(square, 3);
-  // Morph star to polygon
   const morph2 = star.morph(poly, 3);
-  // Also animate opacity
   morph1.opacity(0.5, 3);
   morph2.opacity(0.5, 3);
 
@@ -1720,52 +1786,23 @@ async function testMorphing() {
   console.log("Test 3 completed");
 }
 
-// Test 4: Text and Image shapes
-async function testTextAndImage() {
-  console.log("Test 4: Text and Image shapes");
-  jsketchScene.clear();
-
-  // Text shape
-  const text = jsketchScene.Text("Hello 3D!", "24px Arial", {
-    x: -3,
-    y: 2,
-    z: 0,
-  })
-    .stroke("lime")
-    .fill("rgba(0,255,0,0.2)");
-  // Image shape (requires loading)
-  const img = await loadTestImage();
-  const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 });
-  // Animate text color and opacity
-  text.stroke("orange", 2, "easeOutQuad");
-  text.opacity(0.8, 2, "linear");
-  // Animate image position
-  image.translate(0, 0, 0, 3, "easeOutBounce");
-
-  await jsketchScene.wait(4);
-  console.log("Test 4 completed");
-}
-
-// Test 5: Pause/Resume functionality
 async function testPauseResume() {
   console.log("Test 5: Pause/Resume functionality");
   jsketchScene.clear();
 
   const shape = jsketchScene.Circle(2).stroke("white").fill("red");
-  // Animate translation and scale
   shape.translate(5, 0, 0, 4, "linear");
   shape.scale(2, 2, 1, 4, "linear");
 
-  await jsketchScene.wait(1); // let animation start
+  await jsketchScene.wait(1);
   console.log("Pausing for 2 seconds...");
   jsketchScene.pause(2);
-  await jsketchScene.wait(2); // wait during pause
+  await jsketchScene.wait(2);
   console.log("Resumed");
-  await jsketchScene.wait(3); // let animation continue and finish
+  await jsketchScene.wait(3);
   console.log("Test 5 completed");
 }
 
-// Test 6: Multiple simultaneous animations and removal
 async function testMultipleAnimationsAndRemoval() {
   console.log("Test 6: Multiple simultaneous animations and removal");
   jsketchScene.clear();
@@ -1775,25 +1812,21 @@ async function testMultipleAnimationsAndRemoval() {
     const shape = jsketchScene.Square(1.5)
       .translate(i, 0, 0)
       .stroke(`hsl(${(i + 4) * 30}, 100%, 50%)`)
-      .fill(`hsla(${(i + 4) * 30}, 100%, 50%, 0.3)`);
-    // Animate each with different properties
-    shape.rotate(Math.PI * 2, 3, "easeOutQuad");
-    shape.scale(1.5, 1.5, 1, 2, "easeInOutSine");
+      .fill(`hsl(${(i + 4) * 30}, 100%, 50%)`)
+      .opacity(0.3)
+      .rotate(Math.PI * 2, 3, "easeOutQuad")
+      .scale(1.5, 1.5, 1, 2, "easeInOutSine");
     shapes.push(shape);
   }
 
   await jsketchScene.wait(2);
-  // Remove half of them
-  for (let i = 0; i < shapes.length; i += 2) {
-    shapes[i].remove();
-  }
+  for (let i = 0; i < shapes.length; i += 2) shapes[i].remove();
   console.log("Removed every other shape");
 
   await jsketchScene.wait(2);
   console.log("Test 6 completed");
 }
 
-// Test 7: Error handling (invalid morph)
 async function testErrorHandling() {
   console.log("Test 7: Error handling (invalid morph)");
   jsketchScene.clear();
@@ -1801,21 +1834,31 @@ async function testErrorHandling() {
   const shape = jsketchScene.Circle(2);
   const text = jsketchScene.Text("Not a shape");
   try {
-    // This should throw an error because text is not a BaseShape
     shape.morph(text);
     console.error("Morph should have thrown an error!");
-  } catch (e) {
-    console.log("Caught expected error:", e);
+  } catch (e: any) {
+    console.log("Caught expected error:", e.message);
   }
   await jsketchScene.wait(1);
   console.log("Test 7 completed");
 }
 
-// Main test runner
+// Test 8: Draw animation
+async function testDrawAnimation() {
+  console.log("Test 8: Draw animation");
+  jsketchScene.clear();
+
+  jsketchScene.Circle(2).stroke("red").draw(2);
+  jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2, "easeOutQuad");
+  jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1.5);
+  jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3, "easeOutElastic");
+
+  await jsketchScene.wait(4);
+  console.log("Test 8 completed");
+}
+
 (window as any).runAllTests = async function () {
   console.log("Starting comprehensive test suite...");
-  jsketchScene.startRecording();
-
   await testBasicShapes();
   await testKeyframeAnimations();
   await testMorphing();
@@ -1823,7 +1866,6 @@ async function testErrorHandling() {
   await testPauseResume();
   await testMultipleAnimationsAndRemoval();
   await testErrorHandling();
-
+  await testDrawAnimation();
   console.log("All tests completed.");
-  jsketchScene.stopRecording();
 };
