@@ -1488,7 +1488,7 @@ class ShapeRef {
   }
 
   // New method: animate drawing from 0 to 1
-  draw(duration: number, easing: EasingFunction | string = "linear"): this {
+  draw(duration = 1000, easing: EasingFunction | string = "linear"): this {
     const shape = this.scene.getShape(this.id);
     if (shape instanceof BaseShape) {
       const keyframes: Keyframe<number>[] = [
@@ -1848,10 +1848,10 @@ async function testDrawAnimation() {
   console.log("Test 8: Draw animation");
   jsketchScene.clear();
 
-  jsketchScene.Circle(2).stroke("red").draw(2);
-  jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2, "easeOutQuad");
-  jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1.5);
-  jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3, "easeOutElastic");
+  jsketchScene.Circle(2).stroke("red").draw();
+  jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2000, "easeOutQuad");
+  jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1500);
+  jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3000, "easeOutElastic");
 
   await jsketchScene.wait(4);
   console.log("Test 8 completed");
