@@ -1,9 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import {
-  CSS2DObject,
-  CSS2DRenderer,
-} from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { Recorder, RecorderStatus } from "canvas-record";
 
 // ========== Configuration ==========
@@ -11,7 +8,6 @@ const CONFIG = {
   scaleX: 10,
   scaleY: 10,
   scaleZ: 10,
-  gridStep: 1,
   defaultLineWidth: 2,
   defaultFont: "14px sans-serif",
 };
@@ -330,9 +326,12 @@ abstract class BaseShape extends Drawable {
     }
   }
 
-  private async _startAnimation<K extends keyof KeyframeAnimations>(
+  // Generic keyframe setter
+  private async setKeyframes<K extends keyof KeyframeAnimations, T>(
     type: K,
-    setKeyframes: () => void,
+    keyframes: Keyframe<T>[],
+    duration: number,
+    startTime: number
   ): Promise<this> {
     if (this.animationPromises[type]) {
       this.animationPromises[type]!.resolve();
@@ -343,155 +342,65 @@ abstract class BaseShape extends Drawable {
       resolve = res;
     });
     this.animationPromises[type] = { promise, resolve: resolve! };
-    setKeyframes();
+    this.keyframes[type] = new KeyframeAnimation(keyframes, duration, startTime) as any;
     return promise.then(() => this);
   }
 
-  setTranslationKeyframes(
-    keyframes: Keyframe<THREE.Vector3>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("translation", () => {
-      this.keyframes.translation = new KeyframeAnimation(keyframes, duration, startTime);
-    });
+  // Public keyframe methods – thin wrappers
+  setTranslationKeyframes(keyframes: Keyframe<THREE.Vector3>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("translation", keyframes, duration, startTime);
+  }
+  setScaleKeyframes(keyframes: Keyframe<THREE.Vector3>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("scale", keyframes, duration, startTime);
+  }
+  setRotationKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("rotation", keyframes, duration, startTime);
+  }
+  setStrokeColorKeyframes(keyframes: Keyframe<THREE.Color>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("strokeColor", keyframes, duration, startTime);
+  }
+  setFillColorKeyframes(keyframes: Keyframe<THREE.Color>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("fillColor", keyframes, duration, startTime);
+  }
+  setOpacityKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("opacity", keyframes, duration, startTime);
+  }
+  setDrawProgressKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+    return this.setKeyframes("drawProgress", keyframes, duration, startTime);
   }
 
-  setScaleKeyframes(
-    keyframes: Keyframe<THREE.Vector3>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("scale", () => {
-      this.keyframes.scale = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
-  setRotationKeyframes(
-    keyframes: Keyframe<number>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("rotation", () => {
-      this.keyframes.rotation = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
-  setStrokeColorKeyframes(
-    keyframes: Keyframe<THREE.Color>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("strokeColor", () => {
-      this.keyframes.strokeColor = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
-  setFillColorKeyframes(
-    keyframes: Keyframe<THREE.Color>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("fillColor", () => {
-      this.keyframes.fillColor = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
-  setOpacityKeyframes(
-    keyframes: Keyframe<number>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("opacity", () => {
-      this.keyframes.opacity = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
-  setDrawProgressKeyframes(
-    keyframes: Keyframe<number>[],
-    duration: number,
-    startTime: number,
-  ): Promise<this> {
-    return this._startAnimation("drawProgress", () => {
-      this.keyframes.drawProgress = new KeyframeAnimation(keyframes, duration, startTime);
-    });
-  }
-
+  // Consolidated update for all animations
   private updateAnimations(now: number): void {
-    if (this.keyframes.translation) {
-      if (this.keyframes.translation.isFinished(now)) {
-        this.group.position.copy(this.keyframes.translation.sample(now));
-        this.keyframes.translation = null;
-        this.animationPromises.translation?.resolve();
-        delete this.animationPromises.translation;
-      } else {
-        this.group.position.copy(this.keyframes.translation.sample(now));
-      }
-    }
-    if (this.keyframes.scale) {
-      if (this.keyframes.scale.isFinished(now)) {
-        this.group.scale.copy(this.keyframes.scale.sample(now));
-        this.keyframes.scale = null;
-        this.animationPromises.scale?.resolve();
-        delete this.animationPromises.scale;
-      } else {
-        this.group.scale.copy(this.keyframes.scale.sample(now));
-      }
-    }
-    if (this.keyframes.rotation) {
-      if (this.keyframes.rotation.isFinished(now)) {
-        this.group.rotation.z = this.keyframes.rotation.sample(now);
-        this.keyframes.rotation = null;
-        this.animationPromises.rotation?.resolve();
-        delete this.animationPromises.rotation;
-      } else {
-        this.group.rotation.z = this.keyframes.rotation.sample(now);
-      }
-    }
-    if (this.keyframes.strokeColor) {
-      if (this.keyframes.strokeColor.isFinished(now)) {
-        this.strokeColor.copy(this.keyframes.strokeColor.sample(now));
-        this.keyframes.strokeColor = null;
-        this.animationPromises.strokeColor?.resolve();
-        delete this.animationPromises.strokeColor;
+    const updaters: {
+      [K in keyof KeyframeAnimations]: (value: any) => void;
+    } = {
+      translation: (v: THREE.Vector3) => this.group.position.copy(v),
+      scale: (v: THREE.Vector3) => this.group.scale.copy(v),
+      rotation: (v: number) => (this.group.rotation.z = v),
+      strokeColor: (v: THREE.Color) => {
+        this.strokeColor.copy(v);
         this.updateMaterialColors();
+      },
+      fillColor: (v: THREE.Color) => {
+        this.fillColor = v.clone();
+        this.updateMaterialColors();
+      },
+      opacity: (v: number) => {
+        this.opacity = v;
+        this.updateMaterialColors();
+      },
+      drawProgress: (v: number) => this.setDrawProgress(v),
+    };
+
+    for (const [key, anim] of Object.entries(this.keyframes) as [keyof KeyframeAnimations, KeyframeAnimation<any> | null][]) {
+      if (!anim) continue;
+      if (anim.isFinished(now)) {
+        updaters[key](anim.sample(now));
+        this.keyframes[key] = null;
+        this.animationPromises[key]?.resolve();
+        delete this.animationPromises[key];
       } else {
-        this.strokeColor.copy(this.keyframes.strokeColor.sample(now));
-        this.updateMaterialColors();
-      }
-    }
-    if (this.keyframes.fillColor) {
-      if (this.keyframes.fillColor.isFinished(now)) {
-        this.fillColor = this.keyframes.fillColor.sample(now);
-        this.keyframes.fillColor = null;
-        this.animationPromises.fillColor?.resolve();
-        delete this.animationPromises.fillColor;
-        this.updateMaterialColors();
-      } else {
-        this.fillColor = this.keyframes.fillColor.sample(now);
-        this.updateMaterialColors();
-      }
-    }
-    if (this.keyframes.opacity) {
-      if (this.keyframes.opacity.isFinished(now)) {
-        this.opacity = this.keyframes.opacity.sample(now);
-        this.keyframes.opacity = null;
-        this.animationPromises.opacity?.resolve();
-        delete this.animationPromises.opacity;
-        this.updateMaterialColors();
-      } else {
-        this.opacity = this.keyframes.opacity.sample(now);
-        this.updateMaterialColors();
-      }
-    }
-    if (this.keyframes.drawProgress) {
-      if (this.keyframes.drawProgress.isFinished(now)) {
-        this.setDrawProgress(this.keyframes.drawProgress.sample(now));
-        this.keyframes.drawProgress = null;
-        this.animationPromises.drawProgress?.resolve();
-        delete this.animationPromises.drawProgress;
-      } else {
-        this.setDrawProgress(this.keyframes.drawProgress.sample(now));
+        updaters[key](anim.sample(now));
       }
     }
   }
@@ -510,17 +419,16 @@ abstract class BaseShape extends Drawable {
   }
 }
 
-// ========== Generic Shape ==========
+// ========== Concrete GenericShape ==========
 class GenericShape extends BaseShape {
   constructor(
     id: number,
-    vertexGen: (t: number) => THREE.Vector3,
+    vertices: THREE.Vector3[],
     closed: boolean,
     translation?: THREE.Vector3,
     scale?: THREE.Vector3,
     rotation?: number,
   ) {
-    const vertices = Array.from({ length: NUM_VERTICES }, (_, i) => vertexGen(i / (NUM_VERTICES - 1)));
     super(id, vertices, CONFIG.defaultLineWidth, closed, translation, scale, rotation);
   }
 }
@@ -803,11 +711,18 @@ class Scene {
   private canvasRecorder: Recorder | null = null;
   private recordingTimeout: number | null = null;
 
+  private threeScene: THREE.Scene;
   private renderer: THREE.WebGLRenderer;
   private labelRenderer: CSS2DRenderer;
   private camera: THREE.PerspectiveCamera;
 
-  constructor(renderer: THREE.WebGLRenderer, labelRenderer: CSS2DRenderer, camera: THREE.PerspectiveCamera) {
+  constructor(
+    threeScene: THREE.Scene,
+    renderer: THREE.WebGLRenderer,
+    labelRenderer: CSS2DRenderer,
+    camera: THREE.PerspectiveCamera,
+  ) {
+    this.threeScene = threeScene;
     this.renderer = renderer;
     this.labelRenderer = labelRenderer;
     this.camera = camera;
@@ -827,16 +742,17 @@ class Scene {
   }
 
   private addToThree(obj: THREE.Object3D): void {
-    (window as any).scene.add(obj);
+    this.threeScene.add(obj);
   }
 
   private removeFromThree(obj: THREE.Object3D): void {
-    (window as any).scene.remove(obj);
+    this.threeScene.remove(obj);
   }
 
   private _createShape(vertexGen: (t: number) => THREE.Vector3, closed: boolean): ShapeRef {
     const id = this.nextId++;
-    const shape = new GenericShape(id, vertexGen, closed);
+    const vertices = Array.from({ length: NUM_VERTICES }, (_, i) => vertexGen(i / (NUM_VERTICES - 1)));
+    const shape = new GenericShape(id, vertices, closed);
     this.drawables.set(id, shape);
     this.addToThree(shape.getObject3D());
     return new ShapeRef(this, id);
@@ -1171,7 +1087,6 @@ class Scene {
       extension,
       encoderOptions: {
         bitrate,
-        // bitrateMode: "variable", // optional; some encoders may not support it
       },
       onStatusChange: (status) => {
         if (status === RecorderStatus.Stopped) {
@@ -1232,8 +1147,8 @@ class Scene {
   }
 
   render(): void {
-    this.renderer.render((window as any).scene, this.camera);
-    this.labelRenderer.render((window as any).scene, this.camera);
+    this.renderer.render(this.threeScene, this.camera);
+    this.labelRenderer.render(this.threeScene, this.camera);
 
     if (this.canvasRecorder && this.canvasRecorder.status === RecorderStatus.Recording) {
       this.canvasRecorder.step();
@@ -1545,12 +1460,10 @@ const canvas = document.getElementById("box") as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 const labelRenderer = new CSS2DRenderer();
 
-// Create camera first
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(10, 10, 15);
 camera.lookAt(0, 0, 0);
 
-// Helper function to set even size (now camera is defined)
 function setEvenSize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -1565,7 +1478,7 @@ function setEvenSize() {
 setEvenSize();
 renderer.setClearColor(0x000000);
 
-const sceneObj = new THREE.Scene();
+const threeScene = new THREE.Scene();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableRotate = true;
@@ -1582,12 +1495,8 @@ labelRenderer.domElement.style.left = "0px";
 labelRenderer.domElement.style.pointerEvents = "none";
 document.body.appendChild(labelRenderer.domElement);
 
-(window as any).scene = sceneObj;
-
-const jsketchScene = new Scene(renderer, labelRenderer, camera);
-(window as any).jsketchScene = jsketchScene;
-
-create3DGrid(sceneObj);
+const jsketchScene = new Scene(threeScene, renderer, labelRenderer, camera);
+create3DGrid(threeScene);
 
 function animate(): void {
   jsketchScene.update(performance.now());
@@ -1598,11 +1507,13 @@ animate();
 
 window.addEventListener("resize", setEvenSize);
 
-// ========== Unified Visual Test Suite ==========
+// Attach for global use in demos
+(window as any).jsketchScene = jsketchScene;
 
+// ========== Unified Visual Test Suite ==========
 async function runAllTests() {
   console.log("🎬 Starting unified visual test suite...");
-  jsketchScene.startRecording(); // optional: start recording the whole suite
+  jsketchScene.startRecording();
   await testAllShapes();
   await testPropertySetters();
   await testKeyframeAnimations();
