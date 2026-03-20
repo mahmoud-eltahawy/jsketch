@@ -4,6 +4,7 @@ import {
   CSS2DObject,
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { Recorder, RecorderStatus } from "canvas-record";
 
 // ========== Configuration ==========
 const CONFIG = {
@@ -13,16 +14,14 @@ const CONFIG = {
   gridStep: 1,
   defaultLineWidth: 2,
   defaultFont: "14px sans-serif",
-}; // removed 'as const' to allow other fonts
+};
 
 const NUM_VERTICES = 400;
 
-// ========== Easing Functions (simplified using factories) ==========
+// ========== Easing Functions ==========
 type EasingFunction = (t: number) => number;
 
-// Factory for power-based easings
 const easePower = (power: number) => (t: number) => Math.pow(t, power);
-// Helper for reverse easing
 const easeOut = (fn: EasingFunction) => (t: number) => 1 - fn(1 - t);
 const easeInOut = (fn: EasingFunction) => (t: number) =>
   t < 0.5 ? fn(t * 2) / 2 : 1 - fn(2 - 2 * t) / 2;
@@ -159,12 +158,10 @@ abstract class Drawable {
     return this.obj;
   }
 
-  dispose(): void {
-    // Overridden by subclasses that need cleanup
-  }
+  dispose(): void {}
 }
 
-// ========== Shape Base with Resource Management ==========
+// ========== Shape Base ==========
 interface KeyframeAnimations {
   translation: KeyframeAnimation<THREE.Vector3> | null;
   scale: KeyframeAnimation<THREE.Vector3> | null;
@@ -228,59 +225,32 @@ abstract class BaseShape extends Drawable {
   }
 
   // Getters
-  public getVertices(): THREE.Vector3[] {
-    return this.vertices;
-  }
-
-  public getStrokeColor(): THREE.Color {
-    return this.strokeColor;
-  }
-
-  public getFillColor(): THREE.Color | null {
-    return this.fillColor;
-  }
-
-  public getOpacity(): number {
-    return this.opacity;
-  }
-
-  public getLineWidth(): number {
-    return this.lineWidth;
-  }
-
-  public getClosed(): boolean {
-    return this.closed;
-  }
-
-  public getDrawProgress(): number {
-    return this._drawProgress;
-  }
-
+  public getVertices(): THREE.Vector3[] { return this.vertices; }
+  public getStrokeColor(): THREE.Color { return this.strokeColor; }
+  public getFillColor(): THREE.Color | null { return this.fillColor; }
+  public getOpacity(): number { return this.opacity; }
+  public getLineWidth(): number { return this.lineWidth; }
+  public getClosed(): boolean { return this.closed; }
+  public getDrawProgress(): number { return this._drawProgress; }
   public setDrawProgress(progress: number): void {
     this._drawProgress = Math.max(0, Math.min(1, progress));
     this.rebuildGeometry();
   }
-
-  public getGroup(): THREE.Group {
-    return this.group;
-  }
+  public getGroup(): THREE.Group { return this.group; }
 
   // Setters
   public setStrokeColor(color: THREE.Color): void {
     this.strokeColor.copy(color);
     this.updateMaterialColors();
   }
-
   public setFillColor(color: THREE.Color | null): void {
     this.fillColor = color ? color.clone() : null;
     this.rebuildGeometry();
   }
-
   public setOpacity(opacity: number): void {
     this.opacity = opacity;
     this.updateMaterialColors();
   }
-
   public setLineWidth(width: number): void {
     this.lineWidth = width;
     if (this.strokeLines) {
@@ -289,11 +259,9 @@ abstract class BaseShape extends Drawable {
   }
 
   protected rebuildGeometry(): void {
-    // Dispose old geometries
     this.disposeFillMesh();
     this.disposeStrokeLines();
 
-    // Fill
     if (this.fillColor && this.vertices.length >= 3 && this._drawProgress === 1) {
       const points = this.vertices.map((v) => new THREE.Vector2(v.x, v.y));
       const shape = new THREE.Shape(points);
@@ -309,7 +277,6 @@ abstract class BaseShape extends Drawable {
       this.group.add(this.fillMesh);
     }
 
-    // Stroke
     if (this.vertices.length > 0) {
       let numPoints = Math.max(2, Math.floor(this.vertices.length * this._drawProgress));
       if (numPoints < 2) numPoints = 0;
@@ -363,28 +330,23 @@ abstract class BaseShape extends Drawable {
     }
   }
 
-  // Generic animation method
   private async _startAnimation<K extends keyof KeyframeAnimations>(
     type: K,
     setKeyframes: () => void,
   ): Promise<this> {
-    // Cancel previous animation for this type
     if (this.animationPromises[type]) {
       this.animationPromises[type]!.resolve();
       delete this.animationPromises[type];
     }
-    // Create a new promise that will resolve when the animation finishes
     let resolve: () => void;
     const promise = new Promise<void>((res) => {
       resolve = res;
     });
     this.animationPromises[type] = { promise, resolve: resolve! };
-    // Start the animation
     setKeyframes();
     return promise.then(() => this);
   }
 
-  // Public animation methods using generic helper
   setTranslationKeyframes(
     keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
@@ -456,7 +418,6 @@ abstract class BaseShape extends Drawable {
   }
 
   private updateAnimations(now: number): void {
-    // Translation
     if (this.keyframes.translation) {
       if (this.keyframes.translation.isFinished(now)) {
         this.group.position.copy(this.keyframes.translation.sample(now));
@@ -467,7 +428,6 @@ abstract class BaseShape extends Drawable {
         this.group.position.copy(this.keyframes.translation.sample(now));
       }
     }
-    // Scale
     if (this.keyframes.scale) {
       if (this.keyframes.scale.isFinished(now)) {
         this.group.scale.copy(this.keyframes.scale.sample(now));
@@ -478,7 +438,6 @@ abstract class BaseShape extends Drawable {
         this.group.scale.copy(this.keyframes.scale.sample(now));
       }
     }
-    // Rotation
     if (this.keyframes.rotation) {
       if (this.keyframes.rotation.isFinished(now)) {
         this.group.rotation.z = this.keyframes.rotation.sample(now);
@@ -489,7 +448,6 @@ abstract class BaseShape extends Drawable {
         this.group.rotation.z = this.keyframes.rotation.sample(now);
       }
     }
-    // Stroke color
     if (this.keyframes.strokeColor) {
       if (this.keyframes.strokeColor.isFinished(now)) {
         this.strokeColor.copy(this.keyframes.strokeColor.sample(now));
@@ -502,7 +460,6 @@ abstract class BaseShape extends Drawable {
         this.updateMaterialColors();
       }
     }
-    // Fill color
     if (this.keyframes.fillColor) {
       if (this.keyframes.fillColor.isFinished(now)) {
         this.fillColor = this.keyframes.fillColor.sample(now);
@@ -515,7 +472,6 @@ abstract class BaseShape extends Drawable {
         this.updateMaterialColors();
       }
     }
-    // Opacity
     if (this.keyframes.opacity) {
       if (this.keyframes.opacity.isFinished(now)) {
         this.opacity = this.keyframes.opacity.sample(now);
@@ -528,7 +484,6 @@ abstract class BaseShape extends Drawable {
         this.updateMaterialColors();
       }
     }
-    // Draw progress
     if (this.keyframes.drawProgress) {
       if (this.keyframes.drawProgress.isFinished(now)) {
         this.setDrawProgress(this.keyframes.drawProgress.sample(now));
@@ -555,7 +510,7 @@ abstract class BaseShape extends Drawable {
   }
 }
 
-// ========== Generic Shape (replaces all individual shape classes) ==========
+// ========== Generic Shape ==========
 class GenericShape extends BaseShape {
   constructor(
     id: number,
@@ -570,7 +525,7 @@ class GenericShape extends BaseShape {
   }
 }
 
-// ========== Unified CSS2D Shape (for text and images) ==========
+// ========== CSS2D Shape ==========
 class CSS2DShape extends Drawable {
   private element: HTMLElement;
   private label: CSS2DObject;
@@ -582,7 +537,7 @@ class CSS2DShape extends Drawable {
     id: number,
     content: string | HTMLImageElement,
     translation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
-    font: string = CONFIG.defaultFont, // now accepts any string
+    font: string = CONFIG.defaultFont,
   ) {
     const div = document.createElement("div");
     div.style.color = "white";
@@ -610,7 +565,6 @@ class CSS2DShape extends Drawable {
     this._opacity = 1;
   }
 
-  // Getters & Setters for text/image content
   get text(): string {
     if (this.element.firstChild && this.element.firstChild.nodeType === Node.TEXT_NODE) {
       return this.element.textContent || "";
@@ -682,7 +636,7 @@ class CSS2DShape extends Drawable {
   }
 }
 
-// ========== Morphing Shape (with precomputed resampled vertices) ==========
+// ========== Morphing Shape ==========
 class MorphShape extends Drawable {
   private shape1: BaseShape;
   private shape2: BaseShape;
@@ -716,7 +670,6 @@ class MorphShape extends Drawable {
     this.startTime = startTime;
     this.sceneRef = scene;
 
-    // Precompute resampled vertices
     const count = Math.max(shape1.getVertices().length, shape2.getVertices().length);
     this.count = count;
     this.resampled1 = resamplePolyline(shape1.getVertices(), shape1.getClosed(), count);
@@ -748,7 +701,6 @@ class MorphShape extends Drawable {
       return;
     }
 
-    // Interpolate vertex positions using precomputed arrays
     for (let i = 0; i < this.count; i++) {
       const x = lerp(this.resampled1[i].x, this.resampled2[i].x, t);
       const y = lerp(this.resampled1[i].y, this.resampled2[i].y, t);
@@ -758,12 +710,10 @@ class MorphShape extends Drawable {
     }
     this.geometry.attributes.position.needsUpdate = true;
 
-    // Interpolate transform properties
     this.line.position.copy(this.shape1.getGroup().position).lerp(this.shape2.getGroup().position, t);
     this.line.scale.copy(this.shape1.getGroup().scale).lerp(this.shape2.getGroup().scale, t);
     this.line.rotation.z = lerp(this.shape1.getGroup().rotation.z, this.shape2.getGroup().rotation.z, t);
 
-    // Interpolate color
     const col = this.shape1.getStrokeColor().clone().lerp(this.shape2.getStrokeColor(), t);
     this.material.color.copy(col);
   }
@@ -774,7 +724,7 @@ class MorphShape extends Drawable {
   }
 }
 
-// ========== Utility: Polyline Resampling ==========
+// ========== Polyline Resampling ==========
 function resamplePolyline(
   vertices: THREE.Vector3[],
   closed: boolean,
@@ -849,8 +799,8 @@ class Scene {
   private pauseStartReal: number | null = null;
   private pauseDuration: number | null = null;
   private totalPausedTime = 0;
-  private mediaRecorder: MediaRecorder | null = null;
-  private recordedChunks: Blob[] = [];
+
+  private canvasRecorder: Recorder | null = null;
   private recordingTimeout: number | null = null;
 
   private renderer: THREE.WebGLRenderer;
@@ -884,7 +834,6 @@ class Scene {
     (window as any).scene.remove(obj);
   }
 
-  // Helper to create a generic shape
   private _createShape(vertexGen: (t: number) => THREE.Vector3, closed: boolean): ShapeRef {
     const id = this.nextId++;
     const shape = new GenericShape(id, vertexGen, closed);
@@ -893,7 +842,6 @@ class Scene {
     return new ShapeRef(this, id);
   }
 
-  // Factory methods
   Circle(radius: number): ShapeRef {
     return this._createShape((t) => {
       const angle = t * 2 * Math.PI;
@@ -909,7 +857,6 @@ class Scene {
       new THREE.Vector3(half, half, 0),
       new THREE.Vector3(-half, half, 0),
     ];
-    // Precompute perimeter segments for closed loop
     const perimeter: { start: THREE.Vector3; end: THREE.Vector3; len: number }[] = [];
     for (let i = 0; i < corners.length; i++) {
       const a = corners[i];
@@ -1017,7 +964,6 @@ class Scene {
     return new ShapeRef(this, id);
   }
 
-  // Direct property setters
   translate(id: number, x: number, y: number, z = 0): void {
     const d = this.drawables.get(id);
     if (d) d.getObject3D().position.set(x, y, z);
@@ -1070,7 +1016,6 @@ class Scene {
     if (d instanceof BaseShape) d.setLineWidth(width);
   }
 
-  // Keyframe animations (return Promises)
   async translateKeyframes(
     id: number,
     keyframes: Keyframe<THREE.Vector3>[],
@@ -1155,7 +1100,6 @@ class Scene {
     return Promise.reject(new Error("Shape does not support draw progress keyframes"));
   }
 
-  // Morph
   morph(id1: number, id2: number, duration = 2000): Promise<void> {
     const shape1 = this.drawables.get(id1);
     const shape2 = this.drawables.get(id2);
@@ -1169,7 +1113,6 @@ class Scene {
     return morph.getCompletionPromise();
   }
 
-  // Removal
   remove(id: number): void {
     this.removalSet.add(id);
   }
@@ -1178,7 +1121,6 @@ class Scene {
     this.removalSet.add(id);
   }
 
-  // Pause / Resume (accumulates)
   pause(seconds: number): this {
     const now = performance.now();
     if (this.pauseStartReal !== null) {
@@ -1203,46 +1145,67 @@ class Scene {
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
   }
 
-  // Recording
-  startRecording(options: { fps?: number; duration?: number; mimeType?: string } = {}): void {
-    if (this.mediaRecorder) return;
-    const fps = options.fps ?? 30;
-    const mimeType = options.mimeType ?? "video/webm;codecs=vp9";
-    const actualMimeType = MediaRecorder.isTypeSupported(mimeType) ? mimeType : "video/webm";
-    const stream = this.renderer.domElement.captureStream(fps);
-    this.mediaRecorder = new MediaRecorder(stream, { mimeType: actualMimeType });
-    this.recordedChunks = [];
-    this.mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size) this.recordedChunks.push(e.data);
-    };
-    this.mediaRecorder.onstop = () => {
-      const blob = new Blob(this.recordedChunks, { type: this.mediaRecorder?.mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `recording-${Date.now()}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
-      this.mediaRecorder = null;
-      this.recordedChunks = [];
-      if (this.recordingTimeout) {
-        clearTimeout(this.recordingTimeout);
-        this.recordingTimeout = null;
-      }
-    };
-    this.mediaRecorder.start();
-    if (options.duration) {
-      this.recordingTimeout = window.setTimeout(() => this.stopRecording(), options.duration * 1000);
+  startRecording(options: { fps?: number; duration?: number; mimeType?: string; bitrate?: number } = {}): void {
+    if (this.canvasRecorder) return;
+
+    const fps = options.fps ?? 60;
+    const duration = options.duration ?? Infinity;
+    const bitrate = options.bitrate ?? 10_000_000;
+
+    const gl = this.renderer.getContext() as WebGLRenderingContext | WebGL2RenderingContext;
+    if (!gl) {
+      console.error("No WebGL context found");
+      return;
+    }
+
+    const mimeType = options.mimeType ?? "video/mp4";
+    let extension = "mp4";
+    if (mimeType.includes("webm")) extension = "webm";
+    if (mimeType.includes("gif")) extension = "gif";
+
+    this.canvasRecorder = new Recorder(gl, {
+      name: "jsketch-recording",
+      duration,
+      frameRate: fps,
+      download: true,
+      extension,
+      encoderOptions: {
+        bitrate,
+        // bitrateMode: "variable", // optional; some encoders may not support it
+      },
+      onStatusChange: (status) => {
+        if (status === RecorderStatus.Stopped) {
+          this.canvasRecorder = null;
+          if (this.recordingTimeout) clearTimeout(this.recordingTimeout);
+        }
+      },
+    });
+
+    this.canvasRecorder.start();
+
+    if (options.duration && options.duration > 0) {
+      this.recordingTimeout = window.setTimeout(() => {
+        this.stopRecording();
+      }, options.duration * 1000);
     }
   }
 
   stopRecording(): void {
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
+    if (!this.canvasRecorder) return;
+
+    try {
+      this.canvasRecorder.stop();
+    } catch (err: any) {
+      console.error("Recording failed:", err);
+    } finally {
+      this.canvasRecorder = null;
+      if (this.recordingTimeout) {
+        clearTimeout(this.recordingTimeout);
+        this.recordingTimeout = null;
+      }
     }
   }
 
-  // Update and Render
   update(now: number): void {
     if (this.pauseStartReal !== null) {
       const elapsedPause = now - this.pauseStartReal;
@@ -1271,6 +1234,10 @@ class Scene {
   render(): void {
     this.renderer.render((window as any).scene, this.camera);
     this.labelRenderer.render((window as any).scene, this.camera);
+
+    if (this.canvasRecorder && this.canvasRecorder.status === RecorderStatus.Recording) {
+      this.canvasRecorder.step();
+    }
   }
 
   clear(): void {
@@ -1284,7 +1251,7 @@ class Scene {
   }
 }
 
-// ========== Shape Reference (Fluent API with Consistent Promises, using helper) ==========
+// ========== Shape Reference ==========
 class ShapeRef {
   private scene: Scene;
   private id: number;
@@ -1294,7 +1261,6 @@ class ShapeRef {
     this.id = id;
   }
 
-  // Helper to handle animation vs immediate set
   private _animateOrSet<T>(
     immediateSetter: (val: T) => void,
     value: T,
@@ -1317,7 +1283,6 @@ class ShapeRef {
     }
   }
 
-  // Translation
   translate(x: number, y: number, z?: number): ShapeRef;
   translate(x: number, y: number, z: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   translate(x: number, y: number, z: number = 0, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1336,7 +1301,6 @@ class ShapeRef {
     );
   }
 
-  // Scale
   scale(sx: number, sy?: number, sz?: number): ShapeRef;
   scale(sx: number, sy: number, sz: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   scale(sx: number, sy: number = sx, sz: number = 1, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1355,7 +1319,6 @@ class ShapeRef {
     );
   }
 
-  // Rotation (2D around Z)
   rotate(angle: number): ShapeRef;
   rotate(angle: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   rotate(angle: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1373,7 +1336,6 @@ class ShapeRef {
     );
   }
 
-  // Stroke color
   stroke(color: THREE.Color | string): ShapeRef;
   stroke(color: THREE.Color | string, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   stroke(color: THREE.Color | string, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1392,7 +1354,6 @@ class ShapeRef {
     );
   }
 
-  // Fill color
   fill(color: THREE.Color | string | null): ShapeRef;
   fill(color: THREE.Color | string | null, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   fill(color: THREE.Color | string | null, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1415,7 +1376,6 @@ class ShapeRef {
     );
   }
 
-  // Opacity
   opacity(value: number): ShapeRef;
   opacity(value: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
   opacity(value: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
@@ -1433,7 +1393,6 @@ class ShapeRef {
     );
   }
 
-  // Draw animation (only for BaseShape)
   draw(duration: number = 2000, easing: EasingFunction | string = "linear"): Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
     if (shape instanceof BaseShape) {
@@ -1447,7 +1406,6 @@ class ShapeRef {
     }
   }
 
-  // Keyframes (synchronous – sets keyframes without waiting)
   keyframes(config: any, duration: number): this {
     const shape = this.scene.getShape(this.id);
     if (!shape || !(shape instanceof BaseShape)) return this;
@@ -1511,7 +1469,6 @@ class ShapeRef {
     return this;
   }
 
-  // Miscellaneous setters
   font(fontString: string): this {
     this.scene.font(this.id, fontString);
     return this;
@@ -1521,12 +1478,10 @@ class ShapeRef {
     return this;
   }
 
-  // Morph
   morph(other: ShapeRef, duration = 2000): Promise<void> {
     return this.scene.morph(this.id, other.id, duration);
   }
 
-  // Removal
   remove(): void {
     this.scene.remove(this.id);
   }
@@ -1588,14 +1543,29 @@ function create3DGrid(scene: THREE.Scene): void {
 // ========== Main Execution ==========
 const canvas = document.getElementById("box") as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x000000);
+const labelRenderer = new CSS2DRenderer();
 
-const sceneObj = new THREE.Scene();
-
+// Create camera first
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(10, 10, 15);
 camera.lookAt(0, 0, 0);
+
+// Helper function to set even size (now camera is defined)
+function setEvenSize() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const evenWidth = width % 2 === 0 ? width : width + 1;
+  const evenHeight = height % 2 === 0 ? height : height + 1;
+  renderer.setSize(evenWidth, evenHeight);
+  labelRenderer.setSize(evenWidth, evenHeight);
+  camera.aspect = evenWidth / evenHeight;
+  camera.updateProjectionMatrix();
+}
+
+setEvenSize();
+renderer.setClearColor(0x000000);
+
+const sceneObj = new THREE.Scene();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableRotate = true;
@@ -1605,7 +1575,6 @@ controls.zoomSpeed = 1.2;
 controls.minDistance = 0.2;
 controls.panSpeed = 0.8;
 
-const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
 labelRenderer.domElement.style.position = "absolute";
 labelRenderer.domElement.style.top = "0px";
@@ -1627,26 +1596,13 @@ function animate(): void {
 }
 animate();
 
-window.addEventListener("resize", () => {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  renderer.setSize(width, height);
-  labelRenderer.setSize(width, height);
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
-});
+window.addEventListener("resize", setEvenSize);
 
 // ========== Unified Visual Test Suite ==========
 
-/**
- * Runs all visual tests in sequence, clearing the scene between each.
- * This tests every feature of the library with visual feedback.
- */
 async function runAllTests() {
   console.log("🎬 Starting unified visual test suite...");
-
-  addInstruction("Recording test : (stops when the test ends)", "orange", 2000);
-  jsketchScene.startRecording()
+  jsketchScene.startRecording(); // optional: start recording the whole suite
   await testAllShapes();
   await testPropertySetters();
   await testKeyframeAnimations();
@@ -1657,12 +1613,10 @@ async function runAllTests() {
   await testMultipleAnimations();
   await testErrorHandling();
   await testTextAndImage();
-  
-  addInstruction("✅ All visual tests completed.", "orange", 2000);
-  jsketchScene.stopRecording()
+  jsketchScene.stopRecording();
+  console.log("✅ All visual tests completed.");
 }
 
-// Helper: add a temporary label for instructions
 function addInstruction(text: string, color: string = "white", duration: number = 2000) {
   const div = document.createElement("div");
   div.textContent = text;
@@ -1680,7 +1634,6 @@ function addInstruction(text: string, color: string = "white", duration: number 
   setTimeout(() => div.remove(), duration);
 }
 
-// 1. Test all shape types with distinct visuals
 async function testAllShapes() {
   console.log("Test: All shape types");
   jsketchScene.clear();
@@ -1704,7 +1657,6 @@ async function testAllShapes() {
   await jsketchScene.wait(3);
 }
 
-// 2. Test property setters (translate, scale, rotate, stroke, fill, opacity, font, lineWidth)
 async function testPropertySetters() {
   console.log("Test: Property setters");
   jsketchScene.clear();
@@ -1714,21 +1666,18 @@ async function testPropertySetters() {
   shape.translate(0, 2, 0);
   await jsketchScene.wait(1);
 
-  // Translate (immediate)
   addInstruction("Translate: moving right", "yellow", 1000);
   shape.translate(3, 2, 0);
   await jsketchScene.wait(1);
   shape.translate(-3, 2, 0);
   await jsketchScene.wait(1);
 
-  // Scale (immediate)
   addInstruction("Scale: growing", "yellow", 1000);
   shape.scale(2, 2, 1);
   await jsketchScene.wait(1);
   shape.scale(1, 1, 1);
   await jsketchScene.wait(1);
 
-  // Rotate (immediate)
   addInstruction("Rotate: spinning", "yellow", 1000);
   shape.rotate(Math.PI / 2);
   await jsketchScene.wait(0.5);
@@ -1737,7 +1686,6 @@ async function testPropertySetters() {
   shape.rotate(0);
   await jsketchScene.wait(0.5);
 
-  // Stroke color (immediate)
   addInstruction("Stroke color: cycling", "yellow", 1000);
   shape.stroke("red");
   await jsketchScene.wait(0.5);
@@ -1747,20 +1695,17 @@ async function testPropertySetters() {
   await jsketchScene.wait(0.5);
   shape.stroke("white");
 
-  // Fill color (immediate)
   addInstruction("Fill color: to yellow", "yellow", 1000);
   shape.fill("yellow");
   await jsketchScene.wait(1);
   shape.fill("blue");
 
-  // Opacity (immediate)
   addInstruction("Opacity: fade out/in", "yellow", 1000);
   shape.opacity(0.2);
   await jsketchScene.wait(0.5);
   shape.opacity(1);
   await jsketchScene.wait(0.5);
 
-  // Line width
   const line = jsketchScene.Line(-2, -2, 2, -2).stroke("cyan").lineWidth(1);
   addInstruction("Line width: thickening", "yellow", 1000);
   line.lineWidth(5);
@@ -1768,7 +1713,6 @@ async function testPropertySetters() {
   line.lineWidth(1);
   await jsketchScene.wait(1);
 
-  // Font (for text)
   const text = jsketchScene.Text("Font test", "16px Arial", { x: 0, y: -2, z: 0 }).stroke("white");
   addInstruction("Font: changing size", "yellow", 1000);
   text.font("32px Arial");
@@ -1778,7 +1722,6 @@ async function testPropertySetters() {
   await jsketchScene.wait(1);
 }
 
-// 3. Test keyframe animations (translation, scale, rotation, color, opacity)
 async function testKeyframeAnimations() {
   console.log("Test: Keyframe animations");
   jsketchScene.clear();
@@ -1786,25 +1729,21 @@ async function testKeyframeAnimations() {
 
   const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill("blue");
 
-  // Translation animation
   addInstruction("Translation: move in a square", "yellow", 2000);
   await shape.translate(3, 0, 0, 1, "easeInOutQuad");
   await shape.translate(3, 3, 0, 1, "easeInOutQuad");
   await shape.translate(0, 3, 0, 1, "easeInOutQuad");
   await shape.translate(0, 0, 0, 1, "easeInOutQuad");
 
-  // Scale animation
   addInstruction("Scale: pulse", "yellow", 2000);
   await shape.scale(2, 2, 1, 0.5, "easeOutQuad");
   await shape.scale(1, 1, 1, 0.5, "easeOutQuad");
   await shape.scale(2, 2, 1, 0.5, "easeOutQuad");
   await shape.scale(1, 1, 1, 0.5, "easeOutQuad");
 
-  // Rotation animation
   addInstruction("Rotation: full spin", "yellow", 2000);
   await shape.rotate(Math.PI * 2, 2, "easeOutQuad");
 
-  // Color animations
   addInstruction("Stroke & Fill color: rainbow", "yellow", 3000);
   await Promise.all([
     shape.stroke("red", 1, "linear"),
@@ -1819,7 +1758,6 @@ async function testKeyframeAnimations() {
     shape.fill("blue", 1, "linear")
   ]);
 
-  // Opacity animation
   addInstruction("Opacity: fade out/in", "yellow", 2000);
   await shape.opacity(0.2, 1, "easeOutQuad");
   await shape.opacity(1, 1, "easeOutQuad");
@@ -1827,7 +1765,6 @@ async function testKeyframeAnimations() {
   await jsketchScene.wait(1);
 }
 
-// 4. Test keyframes config object (multiple simultaneous property animations)
 async function testKeyframesConfig() {
   console.log("Test: Keyframes config object");
   jsketchScene.clear();
@@ -1873,7 +1810,6 @@ async function testKeyframesConfig() {
   await jsketchScene.wait(1);
 }
 
-// 5. Test morphing between different shapes
 async function testMorphing() {
   console.log("Test: Morphing");
   jsketchScene.clear();
@@ -1893,7 +1829,6 @@ async function testMorphing() {
   await jsketchScene.wait(1);
 }
 
-// 6. Test draw progress animation
 async function testDrawProgress() {
   console.log("Test: Draw progress");
   jsketchScene.clear();
@@ -1910,7 +1845,6 @@ async function testDrawProgress() {
   await jsketchScene.wait(1);
 }
 
-// 7. Test pause/resume
 async function testPauseResume() {
   console.log("Test: Pause/Resume");
   jsketchScene.clear();
@@ -1928,7 +1862,6 @@ async function testPauseResume() {
   await jsketchScene.wait(1);
 }
 
-// 8. Test multiple simultaneous animations
 async function testMultipleAnimations() {
   console.log("Test: Multiple simultaneous animations");
   jsketchScene.clear();
@@ -1952,7 +1885,6 @@ async function testMultipleAnimations() {
   await jsketchScene.wait(1);
 }
 
-// 9. Test error handling (morph non-shape, unsupported animations)
 async function testErrorHandling() {
   console.log("Test: Error handling");
   jsketchScene.clear();
@@ -1968,7 +1900,6 @@ async function testErrorHandling() {
     console.log("✅ Caught expected error:", e.message);
   }
 
-  // Test unsupported animation on CSS2DShape (should reject gracefully)
   try {
     await text.translate(3, 0, 0, 1, "linear");
   } catch (e: any) {
@@ -1978,7 +1909,6 @@ async function testErrorHandling() {
   await jsketchScene.wait(2);
 }
 
-// 10. Test text and image shapes (with immediate setters and translation)
 async function testTextAndImage() {
   console.log("Test: Text and Image");
   jsketchScene.clear();
@@ -1988,8 +1918,7 @@ async function testTextAndImage() {
     .stroke("lime")
     .fill("green")
     .opacity(0.8);
-  
-  // Create a canvas image
+
   const canvas = document.createElement("canvas");
   canvas.width = 200;
   canvas.height = 200;
@@ -2003,7 +1932,6 @@ async function testTextAndImage() {
   await new Promise(resolve => { img.onload = resolve; img.src = canvas.toDataURL(); });
   const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 }).opacity(0.9);
 
-  // Test immediate translation
   addInstruction("Text: moving left/right", "yellow", 2000);
   text.translate(-3, 2, 0);
   await jsketchScene.wait(0.5);
@@ -2020,7 +1948,6 @@ async function testTextAndImage() {
   image.translate(3, -2, 0);
   await jsketchScene.wait(0.5);
 
-  // Test stroke, fill, opacity changes
   addInstruction("Text: stroke/fill changes", "yellow", 1000);
   text.stroke("cyan");
   text.fill("yellow");
