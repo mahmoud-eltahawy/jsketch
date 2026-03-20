@@ -1487,8 +1487,7 @@ class ShapeRef {
     return this;
   }
 
-  // New method: animate drawing from 0 to 1
-  draw(duration = 1000, easing: EasingFunction | string = "linear"): this {
+  draw(duration = ANIMATION_DURATION, easing: EasingFunction | string = "linear"): this {
     const shape = this.scene.getShape(this.id);
     if (shape instanceof BaseShape) {
       const keyframes: Keyframe<number>[] = [
@@ -1777,8 +1776,8 @@ async function testMorphing() {
   const star = jsketchScene.Star(2.5, 1, 5).translate(0, 4, 0).stroke("yellow");
   const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke("cyan");
 
-  const morph1 = circle.morph(square, 3);
-  const morph2 = star.morph(poly, 3);
+  const morph1 = circle.morph(square);
+  const morph2 = star.morph(poly);
   morph1.opacity(0.5, 3);
   morph2.opacity(0.5, 3);
 
