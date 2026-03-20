@@ -1636,195 +1636,405 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
 });
 
-// ========== Test Suite (unchanged) ==========
-async function testBasicShapes() {
-  console.log("Test 1: Basic shapes creation and properties");
-  jsketchScene.clear();
+// ========== Unified Visual Test Suite ==========
 
-  jsketchScene.Circle(2).translate(-5, 3, 0).stroke("red").fill("red").opacity(0.3);
-  jsketchScene.Square(2.5).translate(0, 3, 0).stroke("green").fill("green").opacity(0.3);
-  jsketchScene.Line(-4, -2, 4, -2).stroke("cyan").lineWidth(3);
-  jsketchScene.RegularPolygon(2, 5).translate(5, 3, 0).stroke("orange").fill("orange").opacity(0.3);
-  jsketchScene.Star(2, 1, 5).translate(-5, -3, 0).stroke("yellow").fill("yellow").opacity(0.3);
-  const parametric = jsketchScene.ParametricCurve(
-    (t) => 3 * Math.cos(2 * Math.PI * t),
-    (t) => 3 * Math.sin(2 * Math.PI * t),
-    0, 1
-  ).stroke("magenta").lineWidth(2);
-  parametric.translate(5, -3, 0);
+/**
+ * Runs all visual tests in sequence, clearing the scene between each.
+ * This tests every feature of the library with visual feedback.
+ */
+async function runAllTests() {
+  console.log("🎬 Starting unified visual test suite...");
 
-  await jsketchScene.wait(2);
-  console.log("Test 1 completed");
+  addInstruction("Recording test : (stops when the test ends)", "orange", 2000);
+  jsketchScene.startRecording()
+  await testAllShapes();
+  await testPropertySetters();
+  await testKeyframeAnimations();
+  await testKeyframesConfig();
+  await testMorphing();
+  await testDrawProgress();
+  await testPauseResume();
+  await testMultipleAnimations();
+  await testErrorHandling();
+  await testTextAndImage();
+  
+  addInstruction("✅ All visual tests completed.", "orange", 2000);
+  jsketchScene.stopRecording()
 }
 
-async function testKeyframeAnimations() {
-  console.log("Test 2: Keyframe animations with various easings");
+// Helper: add a temporary label for instructions
+function addInstruction(text: string, color: string = "white", duration: number = 2000) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  div.style.position = "absolute";
+  div.style.bottom = "20px";
+  div.style.left = "20px";
+  div.style.backgroundColor = "rgba(0,0,0,0.7)";
+  div.style.color = color;
+  div.style.padding = "8px 12px";
+  div.style.borderRadius = "4px";
+  div.style.fontFamily = "monospace";
+  div.style.fontSize = "14px";
+  div.style.zIndex = "1000";
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), duration);
+}
+
+// 1. Test all shape types with distinct visuals
+async function testAllShapes() {
+  console.log("Test: All shape types");
   jsketchScene.clear();
+  addInstruction("All shape types: Circle, Square, Line, RegularPolygon, Star, ParametricCurve", "lime", 3000);
 
-  const shape = jsketchScene.RegularPolygon(2, 6).stroke("white").fill("blue");
-  await shape.translate(0, 0, 0, 3, "easeOutBounce");
-  await shape.scale(3, 3, 1, 2, "easeInElastic");
+  const shapes = [
+    { factory: () => jsketchScene.Circle(1.5).stroke("red").fill("red").opacity(0.5), pos: [-4, 3, 0], name: "Circle" },
+    { factory: () => jsketchScene.Square(2).stroke("green").fill("green").opacity(0.5), pos: [0, 3, 0], name: "Square" },
+    { factory: () => jsketchScene.Line(-2, 1, 2, 1).stroke("cyan").lineWidth(3), pos: [4, 3, 0], name: "Line" },
+    { factory: () => jsketchScene.RegularPolygon(1.5, 5).stroke("orange").fill("orange").opacity(0.5), pos: [-4, 0, 0], name: "Polygon" },
+    { factory: () => jsketchScene.Star(1.5, 0.8, 5).stroke("yellow").fill("yellow").opacity(0.5), pos: [0, 0, 0], name: "Star" },
+    { factory: () => jsketchScene.ParametricCurve(t => 2 * Math.cos(t * 2 * Math.PI), t => 2 * Math.sin(t * 2 * Math.PI), 0, 1).stroke("magenta"), pos: [4, 0, 0], name: "Curve" },
+  ];
+
+  shapes.forEach(({ factory, pos, name }) => {
+    const shape = factory();
+    shape.translate(pos[0], pos[1], pos[2]);
+    jsketchScene.Text(name, "12px Arial", { x: pos[0], y: pos[1] - 1.2, z: 0 }).stroke("white");
+  });
+
+  await jsketchScene.wait(3);
+}
+
+// 2. Test property setters (translate, scale, rotate, stroke, fill, opacity, font, lineWidth)
+async function testPropertySetters() {
+  console.log("Test: Property setters");
+  jsketchScene.clear();
+  addInstruction("Property setters: translate, scale, rotate, stroke, fill, opacity, font, lineWidth", "lime", 3000);
+
+  const shape = jsketchScene.Circle(1).stroke("white").fill("blue").opacity(0.8);
+  shape.translate(0, 2, 0);
+  await jsketchScene.wait(1);
+
+  // Translate (immediate)
+  addInstruction("Translate: moving right", "yellow", 1000);
+  shape.translate(3, 2, 0);
+  await jsketchScene.wait(1);
+  shape.translate(-3, 2, 0);
+  await jsketchScene.wait(1);
+
+  // Scale (immediate)
+  addInstruction("Scale: growing", "yellow", 1000);
+  shape.scale(2, 2, 1);
+  await jsketchScene.wait(1);
+  shape.scale(1, 1, 1);
+  await jsketchScene.wait(1);
+
+  // Rotate (immediate)
+  addInstruction("Rotate: spinning", "yellow", 1000);
+  shape.rotate(Math.PI / 2);
+  await jsketchScene.wait(0.5);
+  shape.rotate(Math.PI);
+  await jsketchScene.wait(0.5);
+  shape.rotate(0);
+  await jsketchScene.wait(0.5);
+
+  // Stroke color (immediate)
+  addInstruction("Stroke color: cycling", "yellow", 1000);
+  shape.stroke("red");
+  await jsketchScene.wait(0.5);
+  shape.stroke("green");
+  await jsketchScene.wait(0.5);
+  shape.stroke("blue");
+  await jsketchScene.wait(0.5);
+  shape.stroke("white");
+
+  // Fill color (immediate)
+  addInstruction("Fill color: to yellow", "yellow", 1000);
+  shape.fill("yellow");
+  await jsketchScene.wait(1);
+  shape.fill("blue");
+
+  // Opacity (immediate)
+  addInstruction("Opacity: fade out/in", "yellow", 1000);
+  shape.opacity(0.2);
+  await jsketchScene.wait(0.5);
+  shape.opacity(1);
+  await jsketchScene.wait(0.5);
+
+  // Line width
+  const line = jsketchScene.Line(-2, -2, 2, -2).stroke("cyan").lineWidth(1);
+  addInstruction("Line width: thickening", "yellow", 1000);
+  line.lineWidth(5);
+  await jsketchScene.wait(1);
+  line.lineWidth(1);
+  await jsketchScene.wait(1);
+
+  // Font (for text)
+  const text = jsketchScene.Text("Font test", "16px Arial", { x: 0, y: -2, z: 0 }).stroke("white");
+  addInstruction("Font: changing size", "yellow", 1000);
+  text.font("32px Arial");
+  await jsketchScene.wait(1);
+  text.font("16px Arial");
+
+  await jsketchScene.wait(1);
+}
+
+// 3. Test keyframe animations (translation, scale, rotation, color, opacity)
+async function testKeyframeAnimations() {
+  console.log("Test: Keyframe animations");
+  jsketchScene.clear();
+  addInstruction("Keyframe animations: translation, scale, rotation, color, opacity", "lime", 3000);
+
+  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill("blue");
+
+  // Translation animation
+  addInstruction("Translation: move in a square", "yellow", 2000);
+  await shape.translate(3, 0, 0, 1, "easeInOutQuad");
+  await shape.translate(3, 3, 0, 1, "easeInOutQuad");
+  await shape.translate(0, 3, 0, 1, "easeInOutQuad");
+  await shape.translate(0, 0, 0, 1, "easeInOutQuad");
+
+  // Scale animation
+  addInstruction("Scale: pulse", "yellow", 2000);
+  await shape.scale(2, 2, 1, 0.5, "easeOutQuad");
+  await shape.scale(1, 1, 1, 0.5, "easeOutQuad");
+  await shape.scale(2, 2, 1, 0.5, "easeOutQuad");
+  await shape.scale(1, 1, 1, 0.5, "easeOutQuad");
+
+  // Rotation animation
+  addInstruction("Rotation: full spin", "yellow", 2000);
   await shape.rotate(Math.PI * 2, 2, "easeOutQuad");
-  await shape.opacity(0.2, 2, "easeInSine");
 
-  const keyframes = {
+  // Color animations
+  addInstruction("Stroke & Fill color: rainbow", "yellow", 3000);
+  await Promise.all([
+    shape.stroke("red", 1, "linear"),
+    shape.fill("red", 1, "linear")
+  ]);
+  await Promise.all([
+    shape.stroke("green", 1, "linear"),
+    shape.fill("green", 1, "linear")
+  ]);
+  await Promise.all([
+    shape.stroke("blue", 1, "linear"),
+    shape.fill("blue", 1, "linear")
+  ]);
+
+  // Opacity animation
+  addInstruction("Opacity: fade out/in", "yellow", 2000);
+  await shape.opacity(0.2, 1, "easeOutQuad");
+  await shape.opacity(1, 1, "easeOutQuad");
+
+  await jsketchScene.wait(1);
+}
+
+// 4. Test keyframes config object (multiple simultaneous property animations)
+async function testKeyframesConfig() {
+  console.log("Test: Keyframes config object");
+  jsketchScene.clear();
+  addInstruction("Keyframes config: simultaneous translation, scale, rotation, color", "lime", 3000);
+
+  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill("blue");
+  shape.translate(-3, 0, 0);
+
+  const config = {
+    translation: [
+      { time: 0, value: { x: -3, y: 0, z: 0 } },
+      { time: 0.5, value: { x: 0, y: 3, z: 0 }, easing: "easeOutQuad" },
+      { time: 1, value: { x: 3, y: 0, z: 0 }, easing: "easeInQuad" }
+    ],
+    scale: [
+      { time: 0, value: { x: 1, y: 1, z: 1 } },
+      { time: 0.5, value: { x: 2, y: 2, z: 1 }, easing: "easeOutElastic" },
+      { time: 1, value: { x: 1, y: 1, z: 1 }, easing: "easeInOutQuad" }
+    ],
+    rotation: [
+      { time: 0, value: 0 },
+      { time: 1, value: Math.PI * 2, easing: "easeInOutSine" }
+    ],
     strokeColor: [
       { time: 0, value: "white" },
       { time: 0.5, value: "red", easing: "easeOutQuad" },
-      { time: 1, value: "blue", easing: "linear" }
+      { time: 1, value: "blue" }
+    ],
+    fillColor: [
+      { time: 0, value: "blue" },
+      { time: 0.5, value: "yellow", easing: "easeOutQuad" },
+      { time: 1, value: "green" }
+    ],
+    opacity: [
+      { time: 0, value: 1 },
+      { time: 0.5, value: 0.3, easing: "linear" },
+      { time: 1, value: 1 }
     ]
   };
-  shape.keyframes(keyframes, 2);
 
-  await jsketchScene.wait(2);
-  console.log("Test 2 completed");
+  shape.keyframes(config, 3000);
+  await jsketchScene.wait(3);
+  await jsketchScene.wait(1);
 }
 
+// 5. Test morphing between different shapes
 async function testMorphing() {
-  console.log("Test 3: Morphing between different shapes");
+  console.log("Test: Morphing");
   jsketchScene.clear();
+  addInstruction("Morphing: Circle ↔ Square ↔ Star", "lime", 3000);
 
-  const circle = jsketchScene.Circle(2).translate(-4, 0, 0).stroke("red");
-  const square = jsketchScene.Square(3).translate(4, 0, 0).stroke("green");
-  const star = jsketchScene.Star(2.5, 1, 5).translate(0, 4, 0).stroke("yellow");
-  const poly = jsketchScene.RegularPolygon(2, 8).translate(0, -4, 0).stroke("cyan");
+  const circle = jsketchScene.Circle(2).translate(-3, 0, 0).stroke("red");
+  const square = jsketchScene.Square(3).translate(3, 0, 0).stroke("green");
+  const star = jsketchScene.Star(2, 1, 5).translate(0, 3, 0).stroke("yellow");
 
-  await Promise.all([circle.morph(square), star.morph(poly)]);
-  console.log("Morphs completed");
+  addInstruction("Morph: Circle → Square", "yellow", 1500);
+  await circle.morph(square, 1500);
+  addInstruction("Morph: Square → Star", "yellow", 1500);
+  await square.morph(star, 1500);
+  addInstruction("Morph: Star → Circle", "yellow", 1500);
+  await star.morph(circle, 1500);
 
   await jsketchScene.wait(1);
-  console.log("Test 3 completed");
 }
 
-async function testTextAndImage() {
-  console.log("Test 4: Text and Image shapes");
+// 6. Test draw progress animation
+async function testDrawProgress() {
+  console.log("Test: Draw progress");
   jsketchScene.clear();
+  addInstruction("Draw progress: shapes being drawn stroke by stroke", "lime", 3000);
 
-  const text = jsketchScene.Text("Hello 3D!", "24px Arial", { x: -3, y: 2, z: 0 })
-    .stroke("lime")
-    .fill("green")
-    .opacity(0.2);
-  const canvas = document.createElement("canvas");
-  canvas.width = 100;
-  canvas.height = 100;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "purple";
-  ctx.fillRect(0, 0, 100, 100);
-  ctx.fillStyle = "white";
-  ctx.font = "20px Arial";
-  ctx.fillText("IMG", 20, 50);
-  const img = new Image();
-  await new Promise((resolve) => {
-    img.onload = resolve;
-    img.src = canvas.toDataURL();
-  });
-  const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 });
-  
-  // Text animations will reject – we catch them to avoid test failure
-  try {
-    await text.stroke("orange", 2, "easeOutQuad");
-  } catch (e) { console.log("Text stroke animation rejected (expected)"); }
-  try {
-    await text.opacity(0.8, 2, "linear");
-  } catch (e) { console.log("Text opacity animation rejected (expected)"); }
-  
-  // Image translation animation is also not supported
-  try {
-    await image.translate(0, 0, 0, 3, "easeOutBounce");
-  } catch (e) { console.log("Image translation animation rejected (expected)"); }
+  const shapes = [
+    jsketchScene.Circle(2).stroke("red").translate(-4, 2, 0),
+    jsketchScene.Square(2.5).stroke("green").translate(0, 2, 0),
+    jsketchScene.Star(2, 1, 5).stroke("yellow").translate(4, 2, 0),
+    jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").translate(0, -2, 0),
+  ];
 
+  await Promise.all(shapes.map(s => s.draw(2000, "easeOutQuad")));
   await jsketchScene.wait(1);
-  console.log("Test 4 completed");
 }
 
+// 7. Test pause/resume
 async function testPauseResume() {
-  console.log("Test 5: Pause/Resume functionality");
+  console.log("Test: Pause/Resume");
   jsketchScene.clear();
+  addInstruction("Pause/Resume: animation will pause for 2 seconds", "lime", 3000);
 
-  const shape = jsketchScene.Circle(2).stroke("white").fill("red");
-  const p1 = shape.translate(5, 0, 0, 4, "linear");
-  const p2 = shape.scale(2, 2, 1, 4, "linear");
+  const shape = jsketchScene.Circle(1.5).stroke("white").fill("red");
+  const movePromise = shape.translate(5, 0, 0, 5, "linear");
 
   await jsketchScene.wait(1);
-  console.log("Pausing for 2 seconds...");
+  addInstruction("Pausing for 2 seconds...", "yellow", 2000);
   jsketchScene.pause(2);
-  await jsketchScene.wait(2);
-  console.log("Resumed");
-  await Promise.all([p1, p2]);
-  console.log("Test 5 completed");
+  await jsketchScene.wait(2.5);
+  addInstruction("Resumed", "lime", 1000);
+  await movePromise;
+  await jsketchScene.wait(1);
 }
 
-async function testMultipleAnimationsAndRemoval() {
-  console.log("Test 6: Multiple simultaneous animations and removal");
+// 8. Test multiple simultaneous animations
+async function testMultipleAnimations() {
+  console.log("Test: Multiple simultaneous animations");
   jsketchScene.clear();
+  addInstruction("Multiple simultaneous animations: rotating and scaling", "lime", 3000);
 
   const shapes = [];
-  const promises = [];
-  for (let i = -4; i <= 4; i += 2) {
-    const shape = jsketchScene.Square(1.5)
+  for (let i = -3; i <= 3; i++) {
+    const shape = jsketchScene.Square(1)
       .translate(i, 0, 0)
-      .stroke(`hsl(${(i + 4) * 30}, 100%, 50%)`)
-      .fill(`hsl(${(i + 4) * 30}, 100%, 50%)`)
-      .opacity(0.3);
-    const p = Promise.all([
-      shape.rotate(Math.PI * 2, 3, "easeOutQuad"),
-      shape.scale(1.5, 1.5, 1, 2, "easeInOutSine")
-    ]);
+      .stroke(`hsl(${((i + 3) * 60) % 360}, 100%, 50%)`)
+      .fill(`hsl(${((i + 3) * 60) % 360}, 100%, 50%)`)
+      .opacity(0.6);
     shapes.push(shape);
-    promises.push(p);
   }
-  await Promise.all(promises);
-  console.log("Animations finished");
+
+  await Promise.all(shapes.map(s => Promise.all([
+    s.rotate(Math.PI * 2, 2, "easeOutQuad"),
+    s.scale(2, 2, 1, 2, "easeOutQuad")
+  ])));
 
   await jsketchScene.wait(1);
-  for (let i = 0; i < shapes.length; i += 2) shapes[i].remove();
-  console.log("Removed every other shape");
-
-  await jsketchScene.wait(2);
-  console.log("Test 6 completed");
 }
 
+// 9. Test error handling (morph non-shape, unsupported animations)
 async function testErrorHandling() {
-  console.log("Test 7: Error handling (invalid morph)");
+  console.log("Test: Error handling");
   jsketchScene.clear();
+  addInstruction("Error handling: morph with text (should show error in console)", "lime", 3000);
 
-  const shape = jsketchScene.Circle(2);
-  const text = jsketchScene.Text("Not a shape");
+  const shape = jsketchScene.Circle(2).stroke("red");
+  const text = jsketchScene.Text("Not a shape", "16px Arial", { x: 2, y: 0, z: 0 }).stroke("white");
+
   try {
     await shape.morph(text);
-    console.error("Morph should have thrown an error!");
+    console.error("❌ Morph should have thrown an error!");
   } catch (e: any) {
-    console.log("Caught expected error:", e.message);
+    console.log("✅ Caught expected error:", e.message);
   }
-  await jsketchScene.wait(1);
-  console.log("Test 7 completed");
+
+  // Test unsupported animation on CSS2DShape (should reject gracefully)
+  try {
+    await text.translate(3, 0, 0, 1, "linear");
+  } catch (e: any) {
+    console.log("✅ Unsupported animation correctly rejected:", e.message);
+  }
+
+  await jsketchScene.wait(2);
 }
 
-async function testDrawAnimation() {
-  console.log("Test 8: Draw animation");
+// 10. Test text and image shapes (with immediate setters and translation)
+async function testTextAndImage() {
+  console.log("Test: Text and Image");
   jsketchScene.clear();
+  addInstruction("Text and Image: with opacity, stroke, fill, and translation", "lime", 3000);
 
-  await Promise.all([
-    jsketchScene.Circle(2).stroke("red").draw(),
-    jsketchScene.Square(2.5).stroke("green").translate(4, 2, 0).draw(2000, "easeOutQuad"),
-    jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").draw(1500),
-    jsketchScene.Star(2, 1, 5).stroke("yellow").translate(-3, -2, 0).draw(3000, "easeOutElastic")
-  ]);
-  console.log("All draw animations finished");
+  const text = jsketchScene.Text("Hello 3D!", "32px Arial", { x: -3, y: 2, z: 0 })
+    .stroke("lime")
+    .fill("green")
+    .opacity(0.8);
+  
+  // Create a canvas image
+  const canvas = document.createElement("canvas");
+  canvas.width = 200;
+  canvas.height = 200;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "purple";
+  ctx.fillRect(0, 0, 200, 200);
+  ctx.fillStyle = "white";
+  ctx.font = "20px Arial";
+  ctx.fillText("JSKETCH", 40, 100);
+  const img = new Image();
+  await new Promise(resolve => { img.onload = resolve; img.src = canvas.toDataURL(); });
+  const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 }).opacity(0.9);
+
+  // Test immediate translation
+  addInstruction("Text: moving left/right", "yellow", 2000);
+  text.translate(-3, 2, 0);
+  await jsketchScene.wait(0.5);
+  text.translate(-1, 2, 0);
+  await jsketchScene.wait(0.5);
+  text.translate(-3, 2, 0);
+  await jsketchScene.wait(0.5);
+
+  addInstruction("Image: moving left/right", "yellow", 2000);
+  image.translate(3, -2, 0);
+  await jsketchScene.wait(0.5);
+  image.translate(1, -2, 0);
+  await jsketchScene.wait(0.5);
+  image.translate(3, -2, 0);
+  await jsketchScene.wait(0.5);
+
+  // Test stroke, fill, opacity changes
+  addInstruction("Text: stroke/fill changes", "yellow", 1000);
+  text.stroke("cyan");
+  text.fill("yellow");
+  await jsketchScene.wait(1);
+  text.stroke("lime");
+  text.fill("green");
+  await jsketchScene.wait(1);
+
+  addInstruction("Image: opacity fade", "yellow", 1000);
+  image.opacity(0.4);
+  await jsketchScene.wait(1);
+  image.opacity(0.9);
 
   await jsketchScene.wait(1);
-  console.log("Test 8 completed");
 }
 
-(window as any).runAllTests = async function () {
-  console.log("Starting comprehensive test suite...");
-  await testBasicShapes();
-  await testKeyframeAnimations();
-  await testMorphing();
-  await testTextAndImage();
-  await testPauseResume();
-  await testMultipleAnimationsAndRemoval();
-  await testErrorHandling();
-  await testDrawAnimation();
-  console.log("All tests completed.");
-};
+(window as any).runAllTests = runAllTests;
