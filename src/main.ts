@@ -1,4 +1,3 @@
-
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Recorder, RecorderStatus } from "canvas-record";
@@ -12,7 +11,7 @@ const CONFIG = {
   defaultFont: "14px sans-serif",
   defaultTextColor: "#ffffff",
   defaultBackground: "transparent",
-  spriteSize: 1, // default size for text/image sprites
+  spriteSize: 1,
 };
 
 const NUM_VERTICES = 400;
@@ -53,9 +52,11 @@ const EASINGS: Record<string, EasingFunction> = {
     if (t === 0) return 0;
     if (t === 1) return 1;
     if ((t *= 2) < 1) {
-      return -0.5 * Math.pow(2, 10 * (t - 1)) * Math.sin((t - 1.1) * 5 * Math.PI);
+      return -0.5 * Math.pow(2, 10 * (t - 1)) *
+        Math.sin((t - 1.1) * 5 * Math.PI);
     }
-    return 0.5 * Math.pow(2, -10 * (t - 1)) * Math.sin((t - 1.1) * 5 * Math.PI) + 1;
+    return 0.5 * Math.pow(2, -10 * (t - 1)) *
+        Math.sin((t - 1.1) * 5 * Math.PI) + 1;
   },
   easeInBounce: (t) => 1 - EASINGS.easeOutBounce(1 - t),
   easeOutBounce: (t) => {
@@ -88,8 +89,9 @@ class KeyframeAnimation<T> {
   constructor(keyframes: Keyframe<T>[], duration: number, startTime: number) {
     if (keyframes.length === 0) throw new Error("Keyframes cannot be empty");
     for (const kf of keyframes) {
-      if (kf.time < 0 || kf.time > 1)
+      if (kf.time < 0 || kf.time > 1) {
         throw new Error("Keyframe time must be between 0 and 1");
+      }
     }
     this.keyframes = [...keyframes].sort((a, b) => a.time - b.time);
     if (this.keyframes[0].time !== 0) {
@@ -117,19 +119,33 @@ class KeyframeAnimation<T> {
     }
     const progress = elapsed / this.duration;
     let i = 0;
-    while (i < this.keyframes.length - 1 && this.keyframes[i + 1].time < progress) i++;
+    while (
+      i < this.keyframes.length - 1 && this.keyframes[i + 1].time < progress
+    ) i++;
     const from = this.keyframes[i];
     const to = this.keyframes[i + 1];
     const segmentT = (progress - from.time) / (to.time - from.time);
     let easedT = segmentT;
     if (to.easing) {
-      const easingFn = typeof to.easing === "string" ? EASINGS[to.easing] : to.easing;
+      const easingFn = typeof to.easing === "string"
+        ? EASINGS[to.easing]
+        : to.easing;
       if (easingFn) easedT = easingFn(segmentT);
     }
-    if (from.value instanceof THREE.Vector3 && to.value instanceof THREE.Vector3) {
-      return (from.value as THREE.Vector3).clone().lerp(to.value as THREE.Vector3, easedT) as T;
-    } else if (from.value instanceof THREE.Color && to.value instanceof THREE.Color) {
-      return (from.value as THREE.Color).clone().lerp(to.value as THREE.Color, easedT) as T;
+    if (
+      from.value instanceof THREE.Vector3 && to.value instanceof THREE.Vector3
+    ) {
+      return (from.value as THREE.Vector3).clone().lerp(
+        to.value as THREE.Vector3,
+        easedT,
+      ) as T;
+    } else if (
+      from.value instanceof THREE.Color && to.value instanceof THREE.Color
+    ) {
+      return (from.value as THREE.Color).clone().lerp(
+        to.value as THREE.Color,
+        easedT,
+      ) as T;
     } else {
       return lerp(from.value as number, to.value as number, easedT) as T;
     }
@@ -160,8 +176,8 @@ abstract class Drawable {
   dispose(): void {}
 }
 
-// ========== Shape Base ==========
-interface KeyframeAnimations {
+// ========== 2D Shape Base ==========
+interface KeyframeAnimations2D {
   translation: KeyframeAnimation<THREE.Vector3> | null;
   scale: KeyframeAnimation<THREE.Vector3> | null;
   rotation: KeyframeAnimation<number> | null;
@@ -186,7 +202,7 @@ abstract class BaseShape extends Drawable {
   public lineWidth: number;
   public closed: boolean;
 
-  protected keyframes: KeyframeAnimations = {
+  protected keyframes: KeyframeAnimations2D = {
     translation: null,
     scale: null,
     rotation: null,
@@ -196,7 +212,9 @@ abstract class BaseShape extends Drawable {
     drawProgress: null,
   };
 
-  private animationPromises: Partial<Record<keyof KeyframeAnimations, AnimationPromise>> = {};
+  private animationPromises: Partial<
+    Record<keyof KeyframeAnimations2D, AnimationPromise>
+  > = {};
 
   constructor(
     id: number,
@@ -211,7 +229,11 @@ abstract class BaseShape extends Drawable {
     super(id, group);
     this.group = group;
     this.vertices = vertices;
-    this.strokeColor = new THREE.Color(Math.random(), Math.random(), Math.random());
+    this.strokeColor = new THREE.Color(
+      Math.random(),
+      Math.random(),
+      Math.random(),
+    );
     this.fillColor = null;
     this.opacity = 1.0;
     this.lineWidth = lineWidth;
@@ -224,18 +246,34 @@ abstract class BaseShape extends Drawable {
   }
 
   // Getters
-  public getVertices(): THREE.Vector3[] { return this.vertices; }
-  public getStrokeColor(): THREE.Color { return this.strokeColor; }
-  public getFillColor(): THREE.Color | null { return this.fillColor; }
-  public getOpacity(): number { return this.opacity; }
-  public getLineWidth(): number { return this.lineWidth; }
-  public getClosed(): boolean { return this.closed; }
-  public getDrawProgress(): number { return this._drawProgress; }
+  public getVertices(): THREE.Vector3[] {
+    return this.vertices;
+  }
+  public getStrokeColor(): THREE.Color {
+    return this.strokeColor;
+  }
+  public getFillColor(): THREE.Color | null {
+    return this.fillColor;
+  }
+  public getOpacity(): number {
+    return this.opacity;
+  }
+  public getLineWidth(): number {
+    return this.lineWidth;
+  }
+  public getClosed(): boolean {
+    return this.closed;
+  }
+  public getDrawProgress(): number {
+    return this._drawProgress;
+  }
   public setDrawProgress(progress: number): void {
     this._drawProgress = Math.max(0, Math.min(1, progress));
     this.rebuildGeometry();
   }
-  public getGroup(): THREE.Group { return this.group; }
+  public getGroup(): THREE.Group {
+    return this.group;
+  }
 
   // Setters
   public setStrokeColor(color: THREE.Color): void {
@@ -261,7 +299,9 @@ abstract class BaseShape extends Drawable {
     this.disposeFillMesh();
     this.disposeStrokeLines();
 
-    if (this.fillColor && this.vertices.length >= 3 && this._drawProgress === 1) {
+    if (
+      this.fillColor && this.vertices.length >= 3 && this._drawProgress === 1
+    ) {
       const points = this.vertices.map((v) => new THREE.Vector2(v.x, v.y));
       const shape = new THREE.Shape(points);
       const geometry = new THREE.ShapeGeometry(shape);
@@ -277,7 +317,10 @@ abstract class BaseShape extends Drawable {
     }
 
     if (this.vertices.length > 0) {
-      let numPoints = Math.max(2, Math.floor(this.vertices.length * this._drawProgress));
+      let numPoints = Math.max(
+        2,
+        Math.floor(this.vertices.length * this._drawProgress),
+      );
       if (numPoints < 2) numPoints = 0;
 
       let points: THREE.Vector3[] = [];
@@ -302,7 +345,9 @@ abstract class BaseShape extends Drawable {
 
   protected updateMaterialColors(): void {
     if (this.strokeLines) {
-      (this.strokeLines.material as THREE.LineBasicMaterial).color.copy(this.strokeColor);
+      (this.strokeLines.material as THREE.LineBasicMaterial).color.copy(
+        this.strokeColor,
+      );
     }
     if (this.fillMesh) {
       const mat = this.fillMesh.material as THREE.MeshBasicMaterial;
@@ -330,11 +375,11 @@ abstract class BaseShape extends Drawable {
   }
 
   // Generic keyframe setter
-  private async setKeyframes<K extends keyof KeyframeAnimations, T>(
+  private async setKeyframes<K extends keyof KeyframeAnimations2D, T>(
     type: K,
     keyframes: Keyframe<T>[],
     duration: number,
-    startTime: number
+    startTime: number,
   ): Promise<this> {
     if (this.animationPromises[type]) {
       this.animationPromises[type]!.resolve();
@@ -345,37 +390,69 @@ abstract class BaseShape extends Drawable {
       resolve = res;
     });
     this.animationPromises[type] = { promise, resolve: resolve! };
-    this.keyframes[type] = new KeyframeAnimation(keyframes, duration, startTime) as any;
+    this.keyframes[type] = new KeyframeAnimation(
+      keyframes,
+      duration,
+      startTime,
+    ) as any;
     return promise.then(() => this);
   }
 
   // Public keyframe methods – thin wrappers
-  setTranslationKeyframes(keyframes: Keyframe<THREE.Vector3>[], duration: number, startTime: number): Promise<this> {
+  setTranslationKeyframes(
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("translation", keyframes, duration, startTime);
   }
-  setScaleKeyframes(keyframes: Keyframe<THREE.Vector3>[], duration: number, startTime: number): Promise<this> {
+  setScaleKeyframes(
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("scale", keyframes, duration, startTime);
   }
-  setRotationKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+  setRotationKeyframes(
+    keyframes: Keyframe<number>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("rotation", keyframes, duration, startTime);
   }
-  setStrokeColorKeyframes(keyframes: Keyframe<THREE.Color>[], duration: number, startTime: number): Promise<this> {
+  setStrokeColorKeyframes(
+    keyframes: Keyframe<THREE.Color>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("strokeColor", keyframes, duration, startTime);
   }
-  setFillColorKeyframes(keyframes: Keyframe<THREE.Color>[], duration: number, startTime: number): Promise<this> {
+  setFillColorKeyframes(
+    keyframes: Keyframe<THREE.Color>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("fillColor", keyframes, duration, startTime);
   }
-  setOpacityKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+  setOpacityKeyframes(
+    keyframes: Keyframe<number>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("opacity", keyframes, duration, startTime);
   }
-  setDrawProgressKeyframes(keyframes: Keyframe<number>[], duration: number, startTime: number): Promise<this> {
+  setDrawProgressKeyframes(
+    keyframes: Keyframe<number>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
     return this.setKeyframes("drawProgress", keyframes, duration, startTime);
   }
 
   // Consolidated update for all animations
   private updateAnimations(now: number): void {
     const updaters: {
-      [K in keyof KeyframeAnimations]: (value: any) => void;
+      [K in keyof KeyframeAnimations2D]: (value: any) => void;
     } = {
       translation: (v: THREE.Vector3) => this.group.position.copy(v),
       scale: (v: THREE.Vector3) => this.group.scale.copy(v),
@@ -395,7 +472,12 @@ abstract class BaseShape extends Drawable {
       drawProgress: (v: number) => this.setDrawProgress(v),
     };
 
-    for (const [key, anim] of Object.entries(this.keyframes) as [keyof KeyframeAnimations, KeyframeAnimation<any> | null][]) {
+    for (
+      const [key, anim] of Object.entries(this.keyframes) as [
+        keyof KeyframeAnimations2D,
+        KeyframeAnimation<any> | null,
+      ][]
+    ) {
       if (!anim) continue;
       if (anim.isFinished(now)) {
         updaters[key](anim.sample(now));
@@ -417,7 +499,7 @@ abstract class BaseShape extends Drawable {
     this.disposeStrokeLines();
     this.group.clear();
     for (const key in this.animationPromises) {
-      this.animationPromises[key as keyof KeyframeAnimations]?.resolve();
+      this.animationPromises[key as keyof KeyframeAnimations2D]?.resolve();
     }
   }
 }
@@ -432,7 +514,15 @@ class GenericShape extends BaseShape {
     scale?: THREE.Vector3,
     rotation?: number,
   ) {
-    super(id, vertices, CONFIG.defaultLineWidth, closed, translation, scale, rotation);
+    super(
+      id,
+      vertices,
+      CONFIG.defaultLineWidth,
+      closed,
+      translation,
+      scale,
+      rotation,
+    );
   }
 }
 
@@ -456,7 +546,6 @@ class WebGLSpriteShape extends Drawable {
     translation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
     font: string = CONFIG.defaultFont,
   ) {
-    // Create canvas for texture
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d")!;
     canvas.width = 256;
@@ -465,7 +554,10 @@ class WebGLSpriteShape extends Drawable {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+    });
     const sprite = new THREE.Sprite(material);
     sprite.position.copy(translation);
     super(id, sprite);
@@ -545,7 +637,6 @@ class WebGLSpriteShape extends Drawable {
     const ctx = this.ctx;
     const canvas = this.canvas;
 
-    // Clear
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (this._fillColor) {
@@ -556,16 +647,13 @@ class WebGLSpriteShape extends Drawable {
     }
 
     if (typeof this._content === "string") {
-      // Draw text
       ctx.font = this._font;
       ctx.fillStyle = this._strokeColor.getStyle();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(this._content, canvas.width / 2, canvas.height / 2);
     } else if (this._content instanceof HTMLImageElement) {
-      // Draw image
       ctx.drawImage(this._content, 0, 0, canvas.width, canvas.height);
-      // Apply tint if stroke color is set (multiply blend)
       if (this._strokeColor) {
         ctx.globalCompositeOperation = "multiply";
         ctx.fillStyle = this._strokeColor.getStyle();
@@ -589,7 +677,85 @@ class WebGLSpriteShape extends Drawable {
   }
 }
 
-// ========== Morphing Shape ==========
+// ========== Morphing Shape (2D only) ==========
+function resamplePolyline(
+  vertices: THREE.Vector3[],
+  closed: boolean,
+  numPoints: number,
+): THREE.Vector3[] {
+  if (vertices.length === 0) return [];
+  if (vertices.length === 1) return Array(numPoints).fill(vertices[0].clone());
+
+  const dist: number[] = [0];
+  for (let i = 1; i < vertices.length; i++) {
+    const dx = vertices[i].x - vertices[i - 1].x;
+    const dy = vertices[i].y - vertices[i - 1].y;
+    dist.push(dist[i - 1] + Math.hypot(dx, dy));
+  }
+
+  if (closed) {
+    const dx = vertices[0].x - vertices[vertices.length - 1].x;
+    const dy = vertices[0].y - vertices[vertices.length - 1].y;
+    const closingLen = Math.hypot(dx, dy);
+    const total = dist[dist.length - 1] + closingLen;
+
+    const segments: {
+      start: THREE.Vector3;
+      end: THREE.Vector3;
+      len: number;
+      cum: number;
+    }[] = [];
+    for (let i = 0; i < vertices.length - 1; i++) {
+      const len = dist[i + 1] - dist[i];
+      segments.push({
+        start: vertices[i],
+        end: vertices[i + 1],
+        len,
+        cum: dist[i + 1],
+      });
+    }
+    segments.push({
+      start: vertices[vertices.length - 1],
+      end: vertices[0],
+      len: closingLen,
+      cum: total,
+    });
+
+    const result: THREE.Vector3[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const targetDist = (i / numPoints) * total;
+      let segIndex = 0;
+      while (
+        segIndex < segments.length && segments[segIndex].cum < targetDist
+      ) segIndex++;
+      if (segIndex >= segments.length) segIndex = segments.length - 1;
+      const seg = segments[segIndex];
+      const prevCum = segIndex === 0 ? 0 : segments[segIndex - 1].cum;
+      const segT = (targetDist - prevCum) / seg.len;
+      const x = lerp(seg.start.x, seg.end.x, segT);
+      const y = lerp(seg.start.y, seg.end.y, segT);
+      result.push(new THREE.Vector3(x, y, 0));
+    }
+    if (result.length > 0) result[result.length - 1] = result[0].clone();
+    return result;
+  } else {
+    const total = dist[dist.length - 1];
+    const result: THREE.Vector3[] = [];
+    for (let i = 0; i < numPoints; i++) {
+      const targetDist = (i / (numPoints - 1)) * total;
+      let segIndex = 1;
+      while (segIndex < dist.length && dist[segIndex] < targetDist) segIndex++;
+      if (segIndex >= dist.length) segIndex = dist.length - 1;
+      const prevDist = dist[segIndex - 1];
+      const segT = (targetDist - prevDist) / (dist[segIndex] - prevDist);
+      const x = lerp(vertices[segIndex - 1].x, vertices[segIndex].x, segT);
+      const y = lerp(vertices[segIndex - 1].y, vertices[segIndex].y, segT);
+      result.push(new THREE.Vector3(x, y, 0));
+    }
+    return result;
+  }
+}
+
 class MorphShape extends Drawable {
   private shape1: BaseShape;
   private shape2: BaseShape;
@@ -623,16 +789,33 @@ class MorphShape extends Drawable {
     this.startTime = startTime;
     this.sceneRef = scene;
 
-    const count = Math.max(shape1.getVertices().length, shape2.getVertices().length);
+    const count = Math.max(
+      shape1.getVertices().length,
+      shape2.getVertices().length,
+    );
     this.count = count;
-    this.resampled1 = resamplePolyline(shape1.getVertices(), shape1.getClosed(), count);
-    this.resampled2 = resamplePolyline(shape2.getVertices(), shape2.getClosed(), count);
+    this.resampled1 = resamplePolyline(
+      shape1.getVertices(),
+      shape1.getClosed(),
+      count,
+    );
+    this.resampled2 = resamplePolyline(
+      shape2.getVertices(),
+      shape2.getClosed(),
+      count,
+    );
 
     this.positions = new Float32Array(count * 3);
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(this.positions, 3),
+    );
     this.geometry = geometry;
-    this.material = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: CONFIG.defaultLineWidth });
+    this.material = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      linewidth: CONFIG.defaultLineWidth,
+    });
     this.line = new THREE.Line(geometry, this.material);
     group.add(this.line);
 
@@ -663,11 +846,24 @@ class MorphShape extends Drawable {
     }
     this.geometry.attributes.position.needsUpdate = true;
 
-    this.line.position.copy(this.shape1.getGroup().position).lerp(this.shape2.getGroup().position, t);
-    this.line.scale.copy(this.shape1.getGroup().scale).lerp(this.shape2.getGroup().scale, t);
-    this.line.rotation.z = lerp(this.shape1.getGroup().rotation.z, this.shape2.getGroup().rotation.z, t);
+    this.line.position.copy(this.shape1.getGroup().position).lerp(
+      this.shape2.getGroup().position,
+      t,
+    );
+    this.line.scale.copy(this.shape1.getGroup().scale).lerp(
+      this.shape2.getGroup().scale,
+      t,
+    );
+    this.line.rotation.z = lerp(
+      this.shape1.getGroup().rotation.z,
+      this.shape2.getGroup().rotation.z,
+      t,
+    );
 
-    const col = this.shape1.getStrokeColor().clone().lerp(this.shape2.getStrokeColor(), t);
+    const col = this.shape1.getStrokeColor().clone().lerp(
+      this.shape2.getStrokeColor(),
+      t,
+    );
     this.material.color.copy(col);
   }
 
@@ -677,70 +873,200 @@ class MorphShape extends Drawable {
   }
 }
 
-// ========== Polyline Resampling ==========
-function resamplePolyline(
-  vertices: THREE.Vector3[],
-  closed: boolean,
-  numPoints: number,
-): THREE.Vector3[] {
-  if (vertices.length === 0) return [];
-  if (vertices.length === 1) return Array(numPoints).fill(vertices[0].clone());
+// ========== 3D Mesh Shape ==========
+class Mesh3D extends Drawable {
+  private mesh: THREE.Mesh;
+  private material: THREE.Material;
+  private _color: THREE.Color;
+  private _opacity: number;
 
-  const dist: number[] = [0];
-  for (let i = 1; i < vertices.length; i++) {
-    const dx = vertices[i].x - vertices[i - 1].x;
-    const dy = vertices[i].y - vertices[i - 1].y;
-    dist.push(dist[i - 1] + Math.hypot(dx, dy));
+  private keyframes: {
+    translation: KeyframeAnimation<THREE.Vector3> | null;
+    scale: KeyframeAnimation<THREE.Vector3> | null;
+    rotation: KeyframeAnimation<THREE.Vector3> | null;
+    color: KeyframeAnimation<THREE.Color> | null;
+    opacity: KeyframeAnimation<number> | null;
+  } = {
+    translation: null,
+    scale: null,
+    rotation: null,
+    color: null,
+    opacity: null,
+  };
+
+  private animationPromises: Partial<
+    Record<
+      keyof typeof this.keyframes,
+      { promise: Promise<void>; resolve: () => void }
+    >
+  > = {};
+
+  constructor(
+    id: number,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    translation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
+    scale: THREE.Vector3 = new THREE.Vector3(1, 1, 1),
+    rotation: THREE.Vector3 = new THREE.Vector3(0, 0, 0),
+  ) {
+    const obj = new THREE.Mesh(geometry, material);
+    obj.position.copy(translation);
+    obj.scale.copy(scale);
+    obj.rotation.set(rotation.x, rotation.y, rotation.z);
+    super(id, obj);
+    this.mesh = obj;
+    this.material = material;
+    this._color = (material as THREE.MeshStandardMaterial).color?.clone() ||
+      new THREE.Color(0xffffff);
+    this._opacity = material.opacity ?? 1;
   }
 
-  if (closed) {
-    const dx = vertices[0].x - vertices[vertices.length - 1].x;
-    const dy = vertices[0].y - vertices[vertices.length - 1].y;
-    const closingLen = Math.hypot(dx, dy);
-    const total = dist[dist.length - 1] + closingLen;
+  getColor(): THREE.Color {
+    return this._color;
+  }
 
-    const segments: { start: THREE.Vector3; end: THREE.Vector3; len: number; cum: number }[] = [];
-    for (let i = 0; i < vertices.length - 1; i++) {
-      const len = dist[i + 1] - dist[i];
-      segments.push({ start: vertices[i], end: vertices[i + 1], len, cum: dist[i + 1] });
+  setColor(color: THREE.Color): void {
+    this._color.copy(color);
+    if (this.material instanceof THREE.MeshStandardMaterial) {
+      this.material.color.copy(color);
     }
-    segments.push({
-      start: vertices[vertices.length - 1],
-      end: vertices[0],
-      len: closingLen,
-      cum: total,
+  }
+
+  getOpacity(): number {
+    return this._opacity;
+  }
+
+  setOpacity(opacity: number): void {
+    this._opacity = opacity;
+    this.material.transparent = opacity < 1;
+    this.material.opacity = opacity;
+  }
+
+  private async setKeyframes<K extends keyof typeof this.keyframes, T>(
+    type: K,
+    keyframes: Keyframe<T>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    if (this.animationPromises[type]) {
+      this.animationPromises[type]!.resolve();
+      delete this.animationPromises[type];
+    }
+    let resolve: () => void;
+    const promise = new Promise<void>((res) => {
+      resolve = res;
     });
+    this.animationPromises[type] = { promise, resolve: resolve! };
+    this.keyframes[type] = new KeyframeAnimation(
+      keyframes,
+      duration,
+      startTime,
+    ) as any;
+    return promise.then(() => this);
+  }
 
-    const result: THREE.Vector3[] = [];
-    for (let i = 0; i < numPoints; i++) {
-      const targetDist = (i / numPoints) * total;
-      let segIndex = 0;
-      while (segIndex < segments.length && segments[segIndex].cum < targetDist) segIndex++;
-      if (segIndex >= segments.length) segIndex = segments.length - 1;
-      const seg = segments[segIndex];
-      const prevCum = segIndex === 0 ? 0 : segments[segIndex - 1].cum;
-      const segT = (targetDist - prevCum) / seg.len;
-      const x = lerp(seg.start.x, seg.end.x, segT);
-      const y = lerp(seg.start.y, seg.end.y, segT);
-      result.push(new THREE.Vector3(x, y, 0));
+  setTranslationKeyframes(
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    return this.setKeyframes("translation", keyframes, duration, startTime);
+  }
+
+  setScaleKeyframes(
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    return this.setKeyframes("scale", keyframes, duration, startTime);
+  }
+
+  setRotationKeyframes(
+    keyframes: Keyframe<THREE.Vector3>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    return this.setKeyframes("rotation", keyframes, duration, startTime);
+  }
+
+  setColorKeyframes(
+    keyframes: Keyframe<THREE.Color>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    return this.setKeyframes("color", keyframes, duration, startTime);
+  }
+
+  setOpacityKeyframes(
+    keyframes: Keyframe<number>[],
+    duration: number,
+    startTime: number,
+  ): Promise<this> {
+    return this.setKeyframes("opacity", keyframes, duration, startTime);
+  }
+
+  update(now: number): void {
+    const entries = Object.entries(this.keyframes) as [
+      keyof typeof this.keyframes,
+      KeyframeAnimation<any> | null,
+    ][];
+    for (const [key, anim] of entries) {
+      if (!anim) continue;
+      const value = anim.sample(now);
+      if (anim.isFinished(now)) {
+        switch (key) {
+          case "translation":
+            this.mesh.position.copy(value as THREE.Vector3);
+            break;
+          case "scale":
+            this.mesh.scale.copy(value as THREE.Vector3);
+            break;
+          case "rotation":
+            this.mesh.rotation.set(
+              (value as THREE.Vector3).x,
+              (value as THREE.Vector3).y,
+              (value as THREE.Vector3).z,
+            );
+            break;
+          case "color":
+            this.setColor(value as THREE.Color);
+            break;
+          case "opacity":
+            this.setOpacity(value as number);
+            break;
+        }
+        this.keyframes[key] = null;
+        this.animationPromises[key]?.resolve();
+        delete this.animationPromises[key];
+      } else {
+        switch (key) {
+          case "translation":
+            this.mesh.position.copy(value as THREE.Vector3);
+            break;
+          case "scale":
+            this.mesh.scale.copy(value as THREE.Vector3);
+            break;
+          case "rotation":
+            this.mesh.rotation.set(
+              (value as THREE.Vector3).x,
+              (value as THREE.Vector3).y,
+              (value as THREE.Vector3).z,
+            );
+            break;
+          case "color":
+            this.setColor(value as THREE.Color);
+            break;
+          case "opacity":
+            this.setOpacity(value as number);
+            break;
+        }
+      }
     }
-    if (result.length > 0) result[result.length - 1] = result[0].clone();
-    return result;
-  } else {
-    const total = dist[dist.length - 1];
-    const result: THREE.Vector3[] = [];
-    for (let i = 0; i < numPoints; i++) {
-      const targetDist = (i / (numPoints - 1)) * total;
-      let segIndex = 1;
-      while (segIndex < dist.length && dist[segIndex] < targetDist) segIndex++;
-      if (segIndex >= dist.length) segIndex = dist.length - 1;
-      const prevDist = dist[segIndex - 1];
-      const segT = (targetDist - prevDist) / (dist[segIndex] - prevDist);
-      const x = lerp(vertices[segIndex - 1].x, vertices[segIndex].x, segT);
-      const y = lerp(vertices[segIndex - 1].y, vertices[segIndex].y, segT);
-      result.push(new THREE.Vector3(x, y, 0));
-    }
-    return result;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    this.material.dispose();
   }
 }
 
@@ -791,9 +1117,16 @@ class Scene {
     this.threeScene.remove(obj);
   }
 
-  private _createShape(vertexGen: (t: number) => THREE.Vector3, closed: boolean): ShapeRef {
+  // ========== 2D Shape Factories ==========
+  private _createShape(
+    vertexGen: (t: number) => THREE.Vector3,
+    closed: boolean,
+  ): ShapeRef {
     const id = this.nextId++;
-    const vertices = Array.from({ length: NUM_VERTICES }, (_, i) => vertexGen(i / (NUM_VERTICES - 1)));
+    const vertices = Array.from(
+      { length: NUM_VERTICES },
+      (_, i) => vertexGen(i / (NUM_VERTICES - 1)),
+    );
     const shape = new GenericShape(id, vertices, closed);
     this.drawables.set(id, shape);
     this.addToThree(shape.getObject3D());
@@ -803,7 +1136,11 @@ class Scene {
   Circle(radius: number): ShapeRef {
     return this._createShape((t) => {
       const angle = t * 2 * Math.PI;
-      return new THREE.Vector3(radius * Math.cos(angle), radius * Math.sin(angle), 0);
+      return new THREE.Vector3(
+        radius * Math.cos(angle),
+        radius * Math.sin(angle),
+        0,
+      );
     }, true);
   }
 
@@ -815,7 +1152,11 @@ class Scene {
       new THREE.Vector3(half, half, 0),
       new THREE.Vector3(-half, half, 0),
     ];
-    const perimeter: { start: THREE.Vector3; end: THREE.Vector3; len: number }[] = [];
+    const perimeter: {
+      start: THREE.Vector3;
+      end: THREE.Vector3;
+      len: number;
+    }[] = [];
     for (let i = 0; i < corners.length; i++) {
       const a = corners[i];
       const b = corners[(i + 1) % corners.length];
@@ -849,9 +1190,19 @@ class Scene {
     const corners: THREE.Vector3[] = [];
     for (let i = 0; i < sides; i++) {
       const angle = (i / sides) * 2 * Math.PI;
-      corners.push(new THREE.Vector3(radius * Math.cos(angle), radius * Math.sin(angle), 0));
+      corners.push(
+        new THREE.Vector3(
+          radius * Math.cos(angle),
+          radius * Math.sin(angle),
+          0,
+        ),
+      );
     }
-    const perimeter: { start: THREE.Vector3; end: THREE.Vector3; len: number }[] = [];
+    const perimeter: {
+      start: THREE.Vector3;
+      end: THREE.Vector3;
+      len: number;
+    }[] = [];
     for (let i = 0; i < corners.length; i++) {
       const a = corners[i];
       const b = corners[(i + 1) % corners.length];
@@ -894,17 +1245,28 @@ class Scene {
     }, false);
   }
 
-  Text(text: string, font: string = CONFIG.defaultFont, translation = { x: 0, y: 0, z: 0 }): ShapeRef {
+  Text(
+    text: string,
+    font: string = CONFIG.defaultFont,
+    translation = { x: 0, y: 0, z: 0 },
+  ): ShapeRef {
     const id = this.nextId++;
-    const shape = new WebGLSpriteShape(id, text, new THREE.Vector3(translation.x, translation.y, translation.z), font);
-    // Set default size based on text length? We'll set a reasonable base size.
+    const shape = new WebGLSpriteShape(
+      id,
+      text,
+      new THREE.Vector3(translation.x, translation.y, translation.z),
+      font,
+    );
     shape.setSize(2, 1);
     this.drawables.set(id, shape);
     this.addToThree(shape.getObject3D());
     return new ShapeRef(this, id);
   }
 
-  Image(image: HTMLImageElement | ImageBitmap, translation = { x: 0, y: 0, z: 0 }): ShapeRef {
+  Image(
+    image: HTMLImageElement | ImageBitmap,
+    translation = { x: 0, y: 0, z: 0 },
+  ): ShapeRef {
     let img: HTMLImageElement;
     if (image instanceof ImageBitmap) {
       const canvas = document.createElement("canvas");
@@ -918,8 +1280,11 @@ class Scene {
       img = image;
     }
     const id = this.nextId++;
-    const shape = new WebGLSpriteShape(id, img, new THREE.Vector3(translation.x, translation.y, translation.z));
-    // Set size based on image dimensions (maintain aspect)
+    const shape = new WebGLSpriteShape(
+      id,
+      img,
+      new THREE.Vector3(translation.x, translation.y, translation.z),
+    );
     const aspect = img.width / img.height;
     shape.setSize(2 * aspect, 2);
     this.drawables.set(id, shape);
@@ -927,24 +1292,102 @@ class Scene {
     return new ShapeRef(this, id);
   }
 
-  translate(id: number, x: number, y: number, z = 0): void {
+  // ========== 3D Shape Factories ==========
+  Cube(
+    size: number,
+    color: THREE.Color | string | number = 0xffffff,
+  ): ShapeRef {
+    const id = this.nextId++;
+    const geometry = new THREE.BoxGeometry(size, size, size);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const cube = new Mesh3D(id, geometry, material);
+    this.drawables.set(id, cube);
+    this.addToThree(cube.getObject3D());
+    return new ShapeRef(this, id);
+  }
+
+  Sphere(
+    radius: number,
+    color: THREE.Color | string | number = 0xffffff,
+  ): ShapeRef {
+    const id = this.nextId++;
+    const geometry = new THREE.SphereGeometry(radius, 32, 32);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const sphere = new Mesh3D(id, geometry, material);
+    this.drawables.set(id, sphere);
+    this.addToThree(sphere.getObject3D());
+    return new ShapeRef(this, id);
+  }
+
+  Cylinder(
+    radiusTop: number,
+    radiusBottom: number,
+    height: number,
+    color: THREE.Color | string | number = 0xffffff,
+  ): ShapeRef {
+    const id = this.nextId++;
+    const geometry = new THREE.CylinderGeometry(
+      radiusTop,
+      radiusBottom,
+      height,
+      32,
+    );
+    const material = new THREE.MeshStandardMaterial({ color });
+    const cylinder = new Mesh3D(id, geometry, material);
+    this.drawables.set(id, cylinder);
+    this.addToThree(cylinder.getObject3D());
+    return new ShapeRef(this, id);
+  }
+
+  Cone(
+    radius: number,
+    height: number,
+    color: THREE.Color | string | number = 0xffffff,
+  ): ShapeRef {
+    const id = this.nextId++;
+    const geometry = new THREE.ConeGeometry(radius, height, 32);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const cone = new Mesh3D(id, geometry, material);
+    this.drawables.set(id, cone);
+    this.addToThree(cone.getObject3D());
+    return new ShapeRef(this, id);
+  }
+
+  Torus(
+    radius: number,
+    tube: number,
+    color: THREE.Color | string | number = 0xffffff,
+  ): ShapeRef {
+    const id = this.nextId++;
+    const geometry = new THREE.TorusGeometry(radius, tube, 64, 64);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const torus = new Mesh3D(id, geometry, material);
+    this.drawables.set(id, torus);
+    this.addToThree(torus.getObject3D());
+    return new ShapeRef(this, id);
+  }
+
+  // ========== Transformation Methods ==========
+  translate(id: number, x: number, y: number, z: number): void {
     const d = this.drawables.get(id);
     if (d) d.getObject3D().position.set(x, y, z);
   }
 
-  scale(id: number, sx: number, sy = sx, sz = 1): void {
+  scale(id: number, sx: number, sy: number, sz: number): void {
     const d = this.drawables.get(id);
     if (d) d.getObject3D().scale.set(sx, sy, sz);
   }
 
-  rotate(id: number, angle: number): void {
+  rotate(id: number, x: number, y: number, z: number): void {
     const d = this.drawables.get(id);
-    if (d) d.getObject3D().rotation.z = angle;
+    if (d) d.getObject3D().rotation.set(x, y, z);
   }
 
   strokeColor(id: number, color: THREE.Color): void {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
+    if (d instanceof Mesh3D) {
+      d.setColor(color);
+    } else if (d instanceof BaseShape) {
       d.setStrokeColor(color);
     } else if (d instanceof WebGLSpriteShape) {
       d.setStrokeColor(color);
@@ -958,11 +1401,14 @@ class Scene {
     } else if (d instanceof WebGLSpriteShape) {
       d.setFillColor(color);
     }
+    // For Mesh3D, fillColor is ignored (use strokeColor)
   }
 
   opacity(id: number, value: number): void {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
+    if (d instanceof Mesh3D) {
+      d.setOpacity(value);
+    } else if (d instanceof BaseShape) {
       d.setOpacity(value);
     } else if (d instanceof WebGLSpriteShape) {
       d.setOpacity(value);
@@ -979,21 +1425,29 @@ class Scene {
     if (d instanceof BaseShape) d.setLineWidth(width);
   }
 
+  // ========== Keyframe Animation Methods ==========
   async translateKeyframes(
     id: number,
     keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape || d instanceof WebGLSpriteShape) {
-      // For simplicity, we'll assume all drawables that support translation have the same method structure.
-      // Actually, WebGLSpriteShape doesn't have keyframe methods yet. We'll need to add them if needed.
-      // For now, we only support BaseShape keyframes.
-      if (d instanceof BaseShape) {
-        return d.setTranslationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
-      }
+    if (d instanceof Mesh3D) {
+      return d.setTranslationKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
+    } else if (d instanceof BaseShape) {
+      return d.setTranslationKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support translation keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support translation keyframes"),
+    );
   }
 
   async scaleKeyframes(
@@ -1002,22 +1456,50 @@ class Scene {
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      return d.setScaleKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    if (d instanceof Mesh3D) {
+      return d.setScaleKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
+    } else if (d instanceof BaseShape) {
+      return d.setScaleKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
     return Promise.reject(new Error("Shape does not support scale keyframes"));
   }
 
   async rotationKeyframes(
     id: number,
-    keyframes: Keyframe<number>[],
+    keyframes: Keyframe<THREE.Vector3>[],
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      return d.setRotationKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    if (d instanceof Mesh3D) {
+      return d.setRotationKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
+    } else if (d instanceof BaseShape) {
+      // Adapt Vector3 keyframes to number (z) for 2D shapes, defaulting to 0
+      const adaptedKeyframes = keyframes.map((kf) => ({
+        time: kf.time,
+        value: kf.value.z ?? 0,
+        easing: kf.easing,
+      }));
+      return d.setRotationKeyframes(
+        adaptedKeyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support rotation keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support rotation keyframes"),
+    );
   }
 
   async strokeColorKeyframes(
@@ -1026,10 +1508,22 @@ class Scene {
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      return d.setStrokeColorKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    if (d instanceof Mesh3D) {
+      return d.setColorKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
+    } else if (d instanceof BaseShape) {
+      return d.setStrokeColorKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support stroke color keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support stroke color keyframes"),
+    );
   }
 
   async fillColorKeyframes(
@@ -1039,9 +1533,15 @@ class Scene {
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
-      return d.setFillColorKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+      return d.setFillColorKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support fill color keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support fill color keyframes"),
+    );
   }
 
   async opacityKeyframes(
@@ -1050,10 +1550,22 @@ class Scene {
     duration: number,
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
-    if (d instanceof BaseShape) {
-      return d.setOpacityKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+    if (d instanceof Mesh3D) {
+      return d.setOpacityKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
+    } else if (d instanceof BaseShape) {
+      return d.setOpacityKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support opacity keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support opacity keyframes"),
+    );
   }
 
   async drawProgressKeyframes(
@@ -1063,11 +1575,18 @@ class Scene {
   ): Promise<ShapeRef> {
     const d = this.drawables.get(id);
     if (d instanceof BaseShape) {
-      return d.setDrawProgressKeyframes(keyframes, duration, this.currentEffectiveTime()).then(() => new ShapeRef(this, id));
+      return d.setDrawProgressKeyframes(
+        keyframes,
+        duration,
+        this.currentEffectiveTime(),
+      ).then(() => new ShapeRef(this, id));
     }
-    return Promise.reject(new Error("Shape does not support draw progress keyframes"));
+    return Promise.reject(
+      new Error("Shape does not support draw progress keyframes"),
+    );
   }
 
+  // ========== Morphing (2D only) ==========
   morph(id1: number, id2: number, duration = 2000): Promise<void> {
     const shape1 = this.drawables.get(id1);
     const shape2 = this.drawables.get(id2);
@@ -1075,12 +1594,20 @@ class Scene {
       throw new Error("Both shapes must be BaseShape for morphing");
     }
     const morphId = this.nextId++;
-    const morph = new MorphShape(morphId, this, shape1, shape2, duration, this.currentEffectiveTime());
+    const morph = new MorphShape(
+      morphId,
+      this,
+      shape1,
+      shape2,
+      duration,
+      this.currentEffectiveTime(),
+    );
     this.drawables.set(morphId, morph);
     this.addToThree(morph.getObject3D());
     return morph.getCompletionPromise();
   }
 
+  // ========== Utility Methods ==========
   remove(id: number): void {
     this.removalSet.add(id);
   }
@@ -1113,14 +1640,23 @@ class Scene {
     return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
   }
 
-  startRecording(options: { fps?: number; duration?: number; mimeType?: string; bitrate?: number } = {}): void {
+  startRecording(
+    options: {
+      fps?: number;
+      duration?: number;
+      mimeType?: string;
+      bitrate?: number;
+    } = {},
+  ): void {
     if (this.canvasRecorder) return;
 
     const fps = options.fps ?? 60;
     const duration = options.duration ?? Infinity;
     const bitrate = options.bitrate ?? 10_000_000;
 
-    const gl = this.renderer.getContext() as WebGLRenderingContext | WebGL2RenderingContext;
+    const gl = this.renderer.getContext() as
+      | WebGLRenderingContext
+      | WebGL2RenderingContext;
     if (!gl) {
       console.error("No WebGL context found");
       return;
@@ -1200,8 +1736,10 @@ class Scene {
 
   render(): void {
     this.renderer.render(this.threeScene, this.camera);
-
-    if (this.canvasRecorder && this.canvasRecorder.status === RecorderStatus.Recording) {
+    if (
+      this.canvasRecorder &&
+      this.canvasRecorder.status === RecorderStatus.Recording
+    ) {
       this.canvasRecorder.step();
     }
   }
@@ -1232,9 +1770,12 @@ class ShapeRef {
     value: T,
     duration: number,
     easing: EasingFunction | string,
-    animMethod: (keyframes: Keyframe<T>[], duration: number) => Promise<ShapeRef>,
+    animMethod: (
+      keyframes: Keyframe<T>[],
+      duration: number,
+    ) => Promise<ShapeRef>,
     getCurrent: () => T,
-    transform?: (val: T) => any
+    transform?: (val: T) => any,
   ): ShapeRef | Promise<ShapeRef> {
     if (duration > 0) {
       const current = getCurrent();
@@ -1249,31 +1790,50 @@ class ShapeRef {
     }
   }
 
-  translate(x: number, y: number, z?: number): ShapeRef;
-  translate(x: number, y: number, z: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  translate(x: number, y: number, z: number = 0, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support translation animation"));
-    }
+  // Translation
+  translate(x: number, y: number, z: number): ShapeRef;
+  translate(
+    x: number,
+    y: number,
+    z: number,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  translate(
+    x: number,
+    y: number,
+    z: number,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
     const target = new THREE.Vector3(x, y, z);
     return this._animateOrSet(
-      (val: THREE.Vector3) => this.scene.translate(this.id, val.x, val.y, val.z),
+      (val: THREE.Vector3) =>
+        this.scene.translate(this.id, val.x, val.y, val.z),
       target,
       duration,
       easing,
       (kf, dur) => this.scene.translateKeyframes(this.id, kf, dur),
-      () => shape!.getObject3D().position.clone()
+      () => this.scene.getShape(this.id)!.getObject3D().position.clone(),
     );
   }
 
-  scale(sx: number, sy?: number, sz?: number): ShapeRef;
-  scale(sx: number, sy: number, sz: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  scale(sx: number, sy: number = sx, sz: number = 1, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support scale animation"));
-    }
+  // Scale
+  scale(sx: number, sy: number, sz: number): ShapeRef;
+  scale(
+    sx: number,
+    sy: number,
+    sz: number,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  scale(
+    sx: number,
+    sy: number,
+    sz: number,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
     const target = new THREE.Vector3(sx, sy, sz);
     return this._animateOrSet(
       (val: THREE.Vector3) => this.scene.scale(this.id, val.x, val.y, val.z),
@@ -1281,85 +1841,147 @@ class ShapeRef {
       duration,
       easing,
       (kf, dur) => this.scene.scaleKeyframes(this.id, kf, dur),
-      () => shape!.getObject3D().scale.clone()
+      () => this.scene.getShape(this.id)!.getObject3D().scale.clone(),
     );
   }
 
-  rotate(angle: number): ShapeRef;
-  rotate(angle: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  rotate(angle: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support rotation animation"));
-    }
+  // Rotation (Euler angles in radians)
+  rotate(x: number, y: number, z: number): ShapeRef;
+  rotate(
+    x: number,
+    y: number,
+    z: number,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  rotate(
+    x: number,
+    y: number,
+    z: number,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
+    const target = new THREE.Vector3(x, y, z);
     return this._animateOrSet(
-      (val: number) => this.scene.rotate(this.id, val),
-      angle,
+      (val: THREE.Vector3) => this.scene.rotate(this.id, val.x, val.y, val.z),
+      target,
       duration,
       easing,
       (kf, dur) => this.scene.rotationKeyframes(this.id, kf, dur),
-      () => shape!.getObject3D().rotation.z
+      () => {
+        const rot = this.scene.getShape(this.id)!.getObject3D().rotation;
+        return new THREE.Vector3(rot.x, rot.y, rot.z);
+      },
     );
   }
 
-  stroke(color: THREE.Color | string): ShapeRef;
-  stroke(color: THREE.Color | string, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  stroke(color: THREE.Color | string, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
+  // Color (for 3D shapes) / Stroke color (for 2D shapes)
+  color(color: THREE.Color | string): ShapeRef;
+  color(
+    color: THREE.Color | string,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  color(
+    color: THREE.Color | string,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
     const col = typeof color === "string" ? new THREE.Color(color) : color;
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support stroke color animation"));
-    }
     return this._animateOrSet(
       (val: THREE.Color) => this.scene.strokeColor(this.id, val),
       col,
       duration,
       easing,
       (kf, dur) => this.scene.strokeColorKeyframes(this.id, kf, dur),
-      () => (shape as any).getStrokeColor().clone()
+      () => {
+        const shape = this.scene.getShape(this.id);
+        if (shape instanceof Mesh3D) return shape.getColor();
+        if (shape instanceof BaseShape) return shape.getStrokeColor();
+        return new THREE.Color(0xffffff);
+      },
     );
   }
 
-  fill(color: THREE.Color | string | null): ShapeRef;
-  fill(color: THREE.Color | string | null, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  fill(color: THREE.Color | string | null, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
-    if (color === null) {
-      this.scene.fillColor(this.id, null);
-      return this;
-    }
-    const col = typeof color === "string" ? new THREE.Color(color) : color;
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support fill color animation"));
-    }
-    return this._animateOrSet(
-      (val: THREE.Color) => this.scene.fillColor(this.id, val),
-      col,
-      duration,
-      easing,
-      (kf, dur) => this.scene.fillColorKeyframes(this.id, kf, dur),
-      () => (shape as any).getFillColor() || new THREE.Color(0, 0, 0)
-    );
-  }
-
+  // Opacity
   opacity(value: number): ShapeRef;
-  opacity(value: number, duration: number, easing?: EasingFunction | string): Promise<ShapeRef>;
-  opacity(value: number, duration: number = 0, easing: EasingFunction | string = "linear"): ShapeRef | Promise<ShapeRef> {
-    const shape = this.scene.getShape(this.id);
-    if (!(shape instanceof BaseShape) && !(shape instanceof WebGLSpriteShape)) {
-      return Promise.reject(new Error("Shape does not support opacity animation"));
-    }
+  opacity(
+    value: number,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  opacity(
+    value: number,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
     return this._animateOrSet(
       (val: number) => this.scene.opacity(this.id, val),
       value,
       duration,
       easing,
       (kf, dur) => this.scene.opacityKeyframes(this.id, kf, dur),
-      () => (shape as any).getOpacity()
+      () => {
+        const shape = this.scene.getShape(this.id);
+        if (shape instanceof Mesh3D) return shape.getOpacity();
+        if (shape instanceof BaseShape) return shape.getOpacity();
+        return 1;
+      },
     );
   }
 
-  draw(duration: number = 2000, easing: EasingFunction | string = "linear"): Promise<ShapeRef> {
+  // Backward compatibility: stroke and fill (for 2D)
+  stroke(color: THREE.Color | string): ShapeRef;
+  stroke(
+    color: THREE.Color | string,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  stroke(
+    color: THREE.Color | string,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
+    return this.color(color, duration, easing);
+  }
+
+  fill(color: THREE.Color | string | null): ShapeRef;
+  fill(
+    color: THREE.Color | string | null,
+    duration: number,
+    easing?: EasingFunction | string,
+  ): Promise<ShapeRef>;
+  fill(
+    color: THREE.Color | string | null,
+    duration: number = 0,
+    easing: EasingFunction | string = "linear",
+  ): ShapeRef | Promise<ShapeRef> {
+    if (color === null) {
+      this.scene.fillColor(this.id, null);
+      return this;
+    }
+    const col = typeof color === "string" ? new THREE.Color(color) : color;
+    return this._animateOrSet(
+      (val: THREE.Color) => this.scene.fillColor(this.id, val),
+      col,
+      duration,
+      easing,
+      (kf, dur) => this.scene.fillColorKeyframes(this.id, kf, dur),
+      () => {
+        const shape = this.scene.getShape(this.id);
+        if (shape instanceof BaseShape) {
+          return shape.getFillColor() || new THREE.Color(0, 0, 0);
+        }
+        return new THREE.Color(0, 0, 0);
+      },
+    );
+  }
+
+  // Draw progress (2D only)
+  draw(
+    duration: number = 2000,
+    easing: EasingFunction | string = "linear",
+  ): Promise<ShapeRef> {
     const shape = this.scene.getShape(this.id);
     if (shape instanceof BaseShape) {
       const keyframes: Keyframe<number>[] = [
@@ -1372,65 +1994,139 @@ class ShapeRef {
     }
   }
 
-  keyframes(config: any, duration: number): this {
+  // Advanced keyframe configuration
+  keyframes(config: {
+    translation?: Array<
+      {
+        time: number;
+        value: { x: number; y: number; z?: number };
+        easing?: EasingFunction | string;
+      }
+    >;
+    scale?: Array<
+      {
+        time: number;
+        value: { x: number; y: number; z?: number };
+        easing?: EasingFunction | string;
+      }
+    >;
+    rotation?: Array<
+      {
+        time: number;
+        value: { x: number; y: number; z?: number };
+        easing?: EasingFunction | string;
+      }
+    >;
+    strokeColor?: Array<
+      {
+        time: number;
+        value: THREE.Color | string;
+        easing?: EasingFunction | string;
+      }
+    >;
+    fillColor?: Array<
+      {
+        time: number;
+        value: THREE.Color | string | null;
+        easing?: EasingFunction | string;
+      }
+    >;
+    opacity?: Array<
+      { time: number; value: number; easing?: EasingFunction | string }
+    >;
+    drawProgress?: Array<
+      { time: number; value: number; easing?: EasingFunction | string }
+    >;
+  }, duration: number): this {
     const shape = this.scene.getShape(this.id);
-    if (!shape || !(shape instanceof BaseShape)) return this;
+    if (!shape) return this;
     const effectiveNow = this.scene.currentEffectiveTime();
     if (config.translation) {
-      const keyframes = config.translation.map((kf: any) => ({
+      const kf = config.translation.map((kf) => ({
         time: kf.time,
         value: new THREE.Vector3(kf.value.x, kf.value.y, kf.value.z ?? 0),
         easing: kf.easing,
       }));
-      shape.setTranslationKeyframes(keyframes, duration, effectiveNow);
+      if (shape instanceof Mesh3D) {
+        shape.setTranslationKeyframes(kf, duration, effectiveNow);
+      } else if (shape instanceof BaseShape) {
+        shape.setTranslationKeyframes(kf, duration, effectiveNow);
+      }
     }
     if (config.scale) {
-      const keyframes = config.scale.map((kf: any) => ({
+      const kf = config.scale.map((kf) => ({
         time: kf.time,
         value: new THREE.Vector3(kf.value.x, kf.value.y, kf.value.z ?? 1),
         easing: kf.easing,
       }));
-      shape.setScaleKeyframes(keyframes, duration, effectiveNow);
+      if (shape instanceof Mesh3D) {
+        shape.setScaleKeyframes(kf, duration, effectiveNow);
+      } else if (shape instanceof BaseShape) {
+        shape.setScaleKeyframes(kf, duration, effectiveNow);
+      }
     }
     if (config.rotation) {
-      const keyframes = config.rotation.map((kf: any) => ({
-        time: kf.time,
-        value: kf.value,
-        easing: kf.easing,
-      }));
-      shape.setRotationKeyframes(keyframes, duration, effectiveNow);
+      if (shape instanceof Mesh3D) {
+        const kf = config.rotation.map((kf) => ({
+          time: kf.time,
+          value: new THREE.Vector3(kf.value.x, kf.value.y, kf.value.z ?? 0),
+          easing: kf.easing,
+        }));
+        shape.setRotationKeyframes(kf, duration, effectiveNow);
+      } else if (shape instanceof BaseShape) {
+        const kf = config.rotation.map((kf) => ({
+          time: kf.time,
+          value: kf.value.z ?? 0, // default to 0 if missing
+          easing: kf.easing,
+        }));
+        shape.setRotationKeyframes(kf, duration, effectiveNow);
+      }
     }
     if (config.strokeColor) {
-      const keyframes = config.strokeColor.map((kf: any) => ({
+      const kf = config.strokeColor.map((kf) => ({
         time: kf.time,
-        value: typeof kf.value === "string" ? new THREE.Color(kf.value) : kf.value,
+        value: typeof kf.value === "string"
+          ? new THREE.Color(kf.value)
+          : kf.value,
         easing: kf.easing,
       }));
-      shape.setStrokeColorKeyframes(keyframes, duration, effectiveNow);
+      if (shape instanceof Mesh3D) {
+        shape.setColorKeyframes(kf, duration, effectiveNow);
+      } else if (shape instanceof BaseShape) {
+        shape.setStrokeColorKeyframes(kf, duration, effectiveNow);
+      }
     }
-    if (config.fillColor) {
-      const keyframes = config.fillColor.map((kf: any) => ({
+    if (config.fillColor && shape instanceof BaseShape) {
+      const kf = config.fillColor.map((kf) => ({
         time: kf.time,
-        value: kf.value === null ? new THREE.Color(0, 0, 0) : (typeof kf.value === "string" ? new THREE.Color(kf.value) : kf.value),
+        value: kf.value === null
+          ? new THREE.Color(0, 0, 0)
+          : (typeof kf.value === "string"
+            ? new THREE.Color(kf.value)
+            : kf.value),
         easing: kf.easing,
       }));
-      shape.setFillColorKeyframes(keyframes, duration, effectiveNow);
+      shape.setFillColorKeyframes(kf, duration, effectiveNow);
     }
     if (config.opacity) {
-      const keyframes = config.opacity.map((kf: any) => ({
+      const kf = config.opacity.map((kf) => ({
         time: kf.time,
         value: kf.value,
         easing: kf.easing,
       }));
-      shape.setOpacityKeyframes(keyframes, duration, effectiveNow);
+      if (shape instanceof Mesh3D) {
+        shape.setOpacityKeyframes(kf, duration, effectiveNow);
+      } else if (shape instanceof BaseShape) {
+        shape.setOpacityKeyframes(kf, duration, effectiveNow);
+      }
     }
-    if (config.drawProgress) {
-      const keyframes = config.drawProgress.map((kf: any) => ({
+    if (config.drawProgress && shape instanceof BaseShape) {
+      const kf = config.drawProgress.map((kf) => ({
         time: kf.time,
         value: kf.value,
         easing: kf.easing,
       }));
-      shape.setDrawProgressKeyframes(keyframes, duration, effectiveNow);
+      shape.setDrawProgressKeyframes(kf, duration, effectiveNow);
     }
     return this;
   }
@@ -1439,6 +2135,7 @@ class ShapeRef {
     this.scene.font(this.id, fontString);
     return this;
   }
+
   lineWidth(width: number): this {
     this.scene.lineWidth(this.id, width);
     return this;
@@ -1455,14 +2152,18 @@ class ShapeRef {
 
 // ========== 3D Grid and Axes ==========
 function create3DGrid(scene: THREE.Scene): void {
-  const gridHelper = new THREE.GridHelper(CONFIG.scaleX * 2, 20, 0x888888, 0x444444);
+  const gridHelper = new THREE.GridHelper(
+    CONFIG.scaleX * 2,
+    20,
+    0x888888,
+    0x444444,
+  );
   gridHelper.position.y = -CONFIG.scaleY / 2;
   scene.add(gridHelper);
 
   const axesHelper = new THREE.AxesHelper(CONFIG.scaleX);
   scene.add(axesHelper);
 
-  // Helper to create sprite labels
   const makeLabel = (text: string, color: string, position: THREE.Vector3) => {
     const canvas = document.createElement("canvas");
     canvas.width = 64;
@@ -1472,7 +2173,7 @@ function create3DGrid(scene: THREE.Scene): void {
     ctx.font = "bold 14px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, canvas.width/2, canvas.height/2);
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture });
     const sprite = new THREE.Sprite(material);
@@ -1495,7 +2196,7 @@ function create3DGrid(scene: THREE.Scene): void {
     ctx.font = `${tickStyle.fontSize} sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    ctx.fillText(i.toString(), canvas.width / 2, canvas.height / 2);
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture });
     const sprite = new THREE.Sprite(material);
@@ -1513,7 +2214,7 @@ function create3DGrid(scene: THREE.Scene): void {
     ctx.font = `${tickStyle.fontSize} sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    ctx.fillText(i.toString(), canvas.width / 2, canvas.height / 2);
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture });
     const sprite = new THREE.Sprite(material);
@@ -1531,7 +2232,7 @@ function create3DGrid(scene: THREE.Scene): void {
     ctx.font = `${tickStyle.fontSize} sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(i.toString(), canvas.width/2, canvas.height/2);
+    ctx.fillText(i.toString(), canvas.width / 2, canvas.height / 2);
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture });
     const sprite = new THREE.Sprite(material);
@@ -1541,11 +2242,32 @@ function create3DGrid(scene: THREE.Scene): void {
   }
 }
 
+// ========== Lighting ==========
+function setupLighting(scene: THREE.Scene): void {
+  const ambientLight = new THREE.AmbientLight(0x404040);
+  scene.add(ambientLight);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(5, 10, 7);
+  scene.add(directionalLight);
+  const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  backLight.position.set(-5, 0, -5);
+  scene.add(backLight);
+}
+
 // ========== Main Execution ==========
 const canvas = document.getElementById("box") as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  preserveDrawingBuffer: true,
+});
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(
+  45,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  1000,
+);
 camera.position.set(10, 10, 15);
 camera.lookAt(0, 0, 0);
 
@@ -1563,6 +2285,7 @@ setEvenSize();
 renderer.setClearColor(0x000000);
 
 const threeScene = new THREE.Scene();
+setupLighting(threeScene);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableRotate = true;
@@ -1584,14 +2307,17 @@ animate();
 
 window.addEventListener("resize", setEvenSize);
 
-// Attach for global use in demos
+// Attach for global use in demos (only these two lines use `any`)
 (window as any).jsketchScene = jsketchScene;
+(window as any).runAllTests = runAllTests;
 
 // ========== Unified Visual Test Suite ==========
 async function runAllTests() {
-  console.log("🎬 Starting unified visual test suite...");
+  console.log("🎬 Starting unified visual test suite (2D + 3D)...");
   jsketchScene.startRecording();
-  await testAllShapes();
+  await test3DShapes();
+  await test3DTransformations();
+  await test2DShapes();
   await testPropertySetters();
   await testKeyframeAnimations();
   await testKeyframesConfig();
@@ -1605,7 +2331,11 @@ async function runAllTests() {
   console.log("✅ All visual tests completed.");
 }
 
-function addInstruction(text: string, color: string = "white", duration: number = 2000) {
+function addInstruction(
+  text: string,
+  color: string = "white",
+  duration: number = 2000,
+) {
   const div = document.createElement("div");
   div.textContent = text;
   div.style.position = "absolute";
@@ -1622,24 +2352,120 @@ function addInstruction(text: string, color: string = "white", duration: number 
   setTimeout(() => div.remove(), duration);
 }
 
-async function testAllShapes() {
-  console.log("Test: All shape types");
+async function test3DShapes() {
+  console.log("Test: 3D shapes");
   jsketchScene.clear();
-  addInstruction("All shape types: Circle, Square, Line, RegularPolygon, Star, ParametricCurve", "lime", 3000);
+  addInstruction(
+    "3D Shapes: Cube, Sphere, Cylinder, Cone, Torus",
+    "lime",
+    3000,
+  );
+
+  const cube = jsketchScene.Cube(1.5).color("red").translate(-3, 2, 0);
+  const sphere = jsketchScene.Sphere(1).color("green").translate(0, 2, 0);
+  const cylinder = jsketchScene.Cylinder(0.8, 0.8, 1.5).color("blue").translate(
+    3,
+    2,
+    0,
+  );
+  const cone = jsketchScene.Cone(1, 2).color("yellow").translate(-3, -2, 0);
+  const torus = jsketchScene.Torus(1.2, 0.3).color("magenta").translate(
+    3,
+    -2,
+    0,
+  );
+
+  await Promise.all([
+    cube.rotate(0, Math.PI * 2, 0, 3, "linear"),
+    sphere.rotate(0, Math.PI * 2, 0, 3, "linear"),
+    cylinder.rotate(0, Math.PI * 2, 0, 3, "linear"),
+    cone.rotate(0, Math.PI * 2, 0, 3, "linear"),
+    torus.rotate(0, Math.PI * 2, 0, 3, "linear"),
+  ]);
+  await jsketchScene.wait(1);
+}
+
+async function test3DTransformations() {
+  console.log("Test: 3D transformations");
+  jsketchScene.clear();
+  addInstruction(
+    "3D Transformations: translate, scale, rotate (all axes)",
+    "lime",
+    3000,
+  );
+
+  const cube = jsketchScene.Cube(1.2).color("cyan");
+  await cube.translate(3, 2, 1, 1, "easeOutQuad");
+  await cube.translate(-3, -2, -1, 1, "easeOutQuad");
+  await cube.scale(2, 2, 2, 1, "easeOutQuad");
+  await cube.scale(1, 1, 1, 1, "easeOutQuad");
+  await cube.rotate(0, Math.PI, 0, 1, "easeOutQuad");
+  await cube.rotate(0, 0, 0, 1, "easeOutQuad");
+  await cube.rotate(Math.PI / 2, 0, 0, 1, "easeOutQuad");
+  await cube.rotate(0, 0, 0, 1, "easeOutQuad");
+  await jsketchScene.wait(1);
+}
+
+async function test2DShapes() {
+  console.log("Test: 2D shapes");
+  jsketchScene.clear();
+  addInstruction(
+    "2D Shapes: Circle, Square, Line, RegularPolygon, Star, ParametricCurve",
+    "lime",
+    3000,
+  );
 
   const shapes = [
-    { factory: () => jsketchScene.Circle(1.5).stroke("red").fill("red").opacity(0.5), pos: [-4, 3, 0], name: "Circle" },
-    { factory: () => jsketchScene.Square(2).stroke("green").fill("green").opacity(0.5), pos: [0, 3, 0], name: "Square" },
-    { factory: () => jsketchScene.Line(-2, 1, 2, 1).stroke("cyan").lineWidth(3), pos: [4, 3, 0], name: "Line" },
-    { factory: () => jsketchScene.RegularPolygon(1.5, 5).stroke("orange").fill("orange").opacity(0.5), pos: [-4, 0, 0], name: "Polygon" },
-    { factory: () => jsketchScene.Star(1.5, 0.8, 5).stroke("yellow").fill("yellow").opacity(0.5), pos: [0, 0, 0], name: "Star" },
-    { factory: () => jsketchScene.ParametricCurve(t => 2 * Math.cos(t * 2 * Math.PI), t => 2 * Math.sin(t * 2 * Math.PI), 0, 1).stroke("magenta"), pos: [4, 0, 0], name: "Curve" },
+    {
+      factory: () =>
+        jsketchScene.Circle(1.5).stroke("red").fill("red").opacity(0.5),
+      pos: [-4, 3, 0],
+      name: "Circle",
+    },
+    {
+      factory: () =>
+        jsketchScene.Square(2).stroke("green").fill("green").opacity(0.5),
+      pos: [0, 3, 0],
+      name: "Square",
+    },
+    {
+      factory: () => jsketchScene.Line(-2, 1, 2, 1).stroke("cyan").lineWidth(3),
+      pos: [4, 3, 0],
+      name: "Line",
+    },
+    {
+      factory: () =>
+        jsketchScene.RegularPolygon(1.5, 5).stroke("orange").fill("orange")
+          .opacity(0.5),
+      pos: [-4, 0, 0],
+      name: "Polygon",
+    },
+    {
+      factory: () =>
+        jsketchScene.Star(1.5, 0.8, 5).stroke("yellow").fill("yellow").opacity(
+          0.5,
+        ),
+      pos: [0, 0, 0],
+      name: "Star",
+    },
+    {
+      factory: () =>
+        jsketchScene.ParametricCurve(
+          (t) => 2 * Math.cos(t * 2 * Math.PI),
+          (t) => 2 * Math.sin(t * 2 * Math.PI),
+          0,
+          1,
+        ).stroke("magenta"),
+      pos: [4, 0, 0],
+      name: "Curve",
+    },
   ];
 
   shapes.forEach(({ factory, pos, name }) => {
     const shape = factory();
     shape.translate(pos[0], pos[1], pos[2]);
-    jsketchScene.Text(name, "12px Arial", { x: pos[0], y: pos[1] - 1.2, z: 0 }).stroke("white");
+    jsketchScene.Text(name, "12px Arial", { x: pos[0], y: pos[1] - 1.2, z: 0 })
+      .stroke("white");
   });
 
   await jsketchScene.wait(3);
@@ -1648,9 +2474,15 @@ async function testAllShapes() {
 async function testPropertySetters() {
   console.log("Test: Property setters");
   jsketchScene.clear();
-  addInstruction("Property setters: translate, scale, rotate, stroke, fill, opacity, font, lineWidth", "lime", 3000);
+  addInstruction(
+    "Property setters: translate, scale, rotate, stroke, fill, opacity, font, lineWidth",
+    "lime",
+    3000,
+  );
 
-  const shape = jsketchScene.Circle(1).stroke("white").fill("blue").opacity(0.8);
+  const shape = jsketchScene.Circle(1).stroke("white").fill("blue").opacity(
+    0.8,
+  );
   shape.translate(0, 2, 0);
   await jsketchScene.wait(1);
 
@@ -1667,11 +2499,11 @@ async function testPropertySetters() {
   await jsketchScene.wait(1);
 
   addInstruction("Rotate: spinning", "yellow", 1000);
-  shape.rotate(Math.PI / 2);
+  shape.rotate(0, 0, Math.PI / 2);
   await jsketchScene.wait(0.5);
-  shape.rotate(Math.PI);
+  shape.rotate(0, 0, Math.PI);
   await jsketchScene.wait(0.5);
-  shape.rotate(0);
+  shape.rotate(0, 0, 0);
   await jsketchScene.wait(0.5);
 
   addInstruction("Stroke color: cycling", "yellow", 1000);
@@ -1701,7 +2533,11 @@ async function testPropertySetters() {
   line.lineWidth(1);
   await jsketchScene.wait(1);
 
-  const text = jsketchScene.Text("Font test", "16px Arial", { x: 0, y: -2, z: 0 }).stroke("white");
+  const text = jsketchScene.Text("Font test", "16px Arial", {
+    x: 0,
+    y: -2,
+    z: 0,
+  }).stroke("white");
   addInstruction("Font: changing size", "yellow", 1000);
   text.font("32px Arial");
   await jsketchScene.wait(1);
@@ -1713,9 +2549,15 @@ async function testPropertySetters() {
 async function testKeyframeAnimations() {
   console.log("Test: Keyframe animations");
   jsketchScene.clear();
-  addInstruction("Keyframe animations: translation, scale, rotation, color, opacity", "lime", 3000);
+  addInstruction(
+    "Keyframe animations: translation, scale, rotation, color, opacity",
+    "lime",
+    3000,
+  );
 
-  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill("blue");
+  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill(
+    "blue",
+  );
 
   addInstruction("Translation: move in a square", "yellow", 2000);
   await shape.translate(3, 0, 0, 1, "easeInOutQuad");
@@ -1730,20 +2572,20 @@ async function testKeyframeAnimations() {
   await shape.scale(1, 1, 1, 0.5, "easeOutQuad");
 
   addInstruction("Rotation: full spin", "yellow", 2000);
-  await shape.rotate(Math.PI * 2, 2, "easeOutQuad");
+  await shape.rotate(0, 0, Math.PI * 2, 2, "easeOutQuad");
 
   addInstruction("Stroke & Fill color: rainbow", "yellow", 3000);
   await Promise.all([
     shape.stroke("red", 1, "linear"),
-    shape.fill("red", 1, "linear")
+    shape.fill("red", 1, "linear"),
   ]);
   await Promise.all([
     shape.stroke("green", 1, "linear"),
-    shape.fill("green", 1, "linear")
+    shape.fill("green", 1, "linear"),
   ]);
   await Promise.all([
     shape.stroke("blue", 1, "linear"),
-    shape.fill("blue", 1, "linear")
+    shape.fill("blue", 1, "linear"),
   ]);
 
   addInstruction("Opacity: fade out/in", "yellow", 2000);
@@ -1756,41 +2598,51 @@ async function testKeyframeAnimations() {
 async function testKeyframesConfig() {
   console.log("Test: Keyframes config object");
   jsketchScene.clear();
-  addInstruction("Keyframes config: simultaneous translation, scale, rotation, color", "lime", 3000);
+  addInstruction(
+    "Keyframes config: simultaneous translation, scale, rotation, color",
+    "lime",
+    3000,
+  );
 
-  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill("blue");
+  const shape = jsketchScene.RegularPolygon(1.5, 6).stroke("white").fill(
+    "blue",
+  );
   shape.translate(-3, 0, 0);
 
   const config = {
     translation: [
       { time: 0, value: { x: -3, y: 0, z: 0 } },
       { time: 0.5, value: { x: 0, y: 3, z: 0 }, easing: "easeOutQuad" },
-      { time: 1, value: { x: 3, y: 0, z: 0 }, easing: "easeInQuad" }
+      { time: 1, value: { x: 3, y: 0, z: 0 }, easing: "easeInQuad" },
     ],
     scale: [
       { time: 0, value: { x: 1, y: 1, z: 1 } },
       { time: 0.5, value: { x: 2, y: 2, z: 1 }, easing: "easeOutElastic" },
-      { time: 1, value: { x: 1, y: 1, z: 1 }, easing: "easeInOutQuad" }
+      { time: 1, value: { x: 1, y: 1, z: 1 }, easing: "easeInOutQuad" },
     ],
     rotation: [
-      { time: 0, value: 0 },
-      { time: 1, value: Math.PI * 2, easing: "easeInOutSine" }
+      { time: 0, value: { x: 0, y: 0, z: 0 } },
+      {
+        time: 1,
+        value: { x: 0, y: 0, z: Math.PI * 2 },
+        easing: "easeInOutSine",
+      },
     ],
     strokeColor: [
       { time: 0, value: "white" },
       { time: 0.5, value: "red", easing: "easeOutQuad" },
-      { time: 1, value: "blue" }
+      { time: 1, value: "blue" },
     ],
     fillColor: [
       { time: 0, value: "blue" },
       { time: 0.5, value: "yellow", easing: "easeOutQuad" },
-      { time: 1, value: "green" }
+      { time: 1, value: "green" },
     ],
     opacity: [
       { time: 0, value: 1 },
       { time: 0.5, value: 0.3, easing: "linear" },
-      { time: 1, value: 1 }
-    ]
+      { time: 1, value: 1 },
+    ],
   };
 
   shape.keyframes(config, 3000);
@@ -1820,7 +2672,11 @@ async function testMorphing() {
 async function testDrawProgress() {
   console.log("Test: Draw progress");
   jsketchScene.clear();
-  addInstruction("Draw progress: shapes being drawn stroke by stroke", "lime", 3000);
+  addInstruction(
+    "Draw progress: shapes being drawn stroke by stroke",
+    "lime",
+    3000,
+  );
 
   const shapes = [
     jsketchScene.Circle(2).stroke("red").translate(-4, 2, 0),
@@ -1829,14 +2685,18 @@ async function testDrawProgress() {
     jsketchScene.Line(-3, -2, 3, -2).stroke("cyan").translate(0, -2, 0),
   ];
 
-  await Promise.all(shapes.map(s => s.draw(2000, "easeOutQuad")));
+  await Promise.all(shapes.map((s) => s.draw(2000, "easeOutQuad")));
   await jsketchScene.wait(1);
 }
 
 async function testPauseResume() {
   console.log("Test: Pause/Resume");
   jsketchScene.clear();
-  addInstruction("Pause/Resume: animation will pause for 2 seconds", "lime", 3000);
+  addInstruction(
+    "Pause/Resume: animation will pause for 2 seconds",
+    "lime",
+    3000,
+  );
 
   const shape = jsketchScene.Circle(1.5).stroke("white").fill("red");
   const movePromise = shape.translate(5, 0, 0, 5, "linear");
@@ -1853,7 +2713,11 @@ async function testPauseResume() {
 async function testMultipleAnimations() {
   console.log("Test: Multiple simultaneous animations");
   jsketchScene.clear();
-  addInstruction("Multiple simultaneous animations: rotating and scaling", "lime", 3000);
+  addInstruction(
+    "Multiple simultaneous animations: rotating and scaling",
+    "lime",
+    3000,
+  );
 
   const shapes = [];
   for (let i = -3; i <= 3; i++) {
@@ -1865,10 +2729,12 @@ async function testMultipleAnimations() {
     shapes.push(shape);
   }
 
-  await Promise.all(shapes.map(s => Promise.all([
-    s.rotate(Math.PI * 2, 2, "easeOutQuad"),
-    s.scale(2, 2, 1, 2, "easeOutQuad")
-  ])));
+  await Promise.all(shapes.map((s) =>
+    Promise.all([
+      s.rotate(0, 0, Math.PI * 2, 2, "easeOutQuad"),
+      s.scale(2, 2, 1, 2, "easeOutQuad"),
+    ])
+  ));
 
   await jsketchScene.wait(1);
 }
@@ -1876,10 +2742,18 @@ async function testMultipleAnimations() {
 async function testErrorHandling() {
   console.log("Test: Error handling");
   jsketchScene.clear();
-  addInstruction("Error handling: morph with text (should show error in console)", "lime", 3000);
+  addInstruction(
+    "Error handling: morph with text (should show error in console)",
+    "lime",
+    3000,
+  );
 
   const shape = jsketchScene.Circle(2).stroke("red");
-  const text = jsketchScene.Text("Not a shape", "16px Arial", { x: 2, y: 0, z: 0 }).stroke("white");
+  const text = jsketchScene.Text("Not a shape", "16px Arial", {
+    x: 2,
+    y: 0,
+    z: 0,
+  }).stroke("white");
 
   try {
     await shape.morph(text);
@@ -1900,9 +2774,17 @@ async function testErrorHandling() {
 async function testTextAndImage() {
   console.log("Test: Text and Image");
   jsketchScene.clear();
-  addInstruction("Text and Image: with opacity, stroke, fill, and translation", "lime", 3000);
+  addInstruction(
+    "Text and Image: with opacity, stroke, fill, and translation",
+    "lime",
+    3000,
+  );
 
-  const text = jsketchScene.Text("Hello 3D!", "32px Arial", { x: -3, y: 2, z: 0 })
+  const text = jsketchScene.Text("Hello 3D!", "32px Arial", {
+    x: -3,
+    y: 2,
+    z: 0,
+  })
     .stroke("lime")
     .fill("green")
     .opacity(0.8);
@@ -1917,7 +2799,10 @@ async function testTextAndImage() {
   ctx.font = "20px Arial";
   ctx.fillText("JSKETCH", 40, 100);
   const img = new Image();
-  await new Promise(resolve => { img.onload = resolve; img.src = canvas.toDataURL(); });
+  await new Promise((resolve) => {
+    img.onload = resolve;
+    img.src = canvas.toDataURL();
+  });
   const image = jsketchScene.Image(img, { x: 3, y: -2, z: 0 }).opacity(0.9);
 
   addInstruction("Text: moving left/right", "yellow", 2000);
@@ -1951,5 +2836,3 @@ async function testTextAndImage() {
 
   await jsketchScene.wait(1);
 }
-
-(window as any).runAllTests = runAllTests;

@@ -1,5 +1,5 @@
 // vite.config.js
-import { defineConfig } from 'vite'
+import { defineConfig } from "vite";
 
 export default defineConfig({
   build: {
@@ -11,8 +11,8 @@ export default defineConfig({
         // Removes hash from split chunks
         chunkFileNames: `[name].js`,
         // Removes hash from static assets (images, css, etc.)
-        assetFileNames: `[name].[ext]`
+        assetFileNames: `[name].[ext]`,
       },
     },
-  }
-})
+  },
+});
