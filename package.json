@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@types/three": "^0.183.1",
-    "canvas-record": "^5.5.1",
     "three": "^0.183.2"
   }
 }
